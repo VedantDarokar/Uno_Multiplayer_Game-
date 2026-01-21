@@ -1,0 +1,11 @@
+import { io } from "socket.io-client";
+
+// In production, this should be the deployed server URL.
+// For local dev, it's localhost:3000
+const URL = window.location.hostname === 'localhost'
+    ? "http://localhost:4000"
+    : `http://${window.location.hostname}:4000`;
+
+export const socket = io(URL, {
+    autoConnect: false
+});
