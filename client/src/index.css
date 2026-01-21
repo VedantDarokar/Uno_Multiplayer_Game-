@@ -20,10 +20,10 @@
 
 body {
   font-family: 'Outfit', sans-serif;
-  background-color: var(--bg-dark);
+  background: radial-gradient(circle at center, #8B0000 20%, #2a0000 100%);
   color: var(--text-light);
   min-height: 100vh;
-  overflow: hidden; /* Prevent scrolling in game */
+  overflow: hidden;
 }
 
 button {
@@ -66,11 +66,200 @@ button {
   box-shadow: 0 5px 15px rgba(167, 119, 227, 0.4);
 }
 
-.card-animation {
+/* Stats, Join Forms Responsive */
+.lobby-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  padding: 20px;
+  gap: 2rem;
+}
+
+.lobby-card {
+  width: 100%;
+  max-width: 450px;
+  padding: 3rem;
+  text-align: center;
+  border: 2px solid rgba(255, 215, 0, 0.3);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+}
+
+.stats-card {
+  width: 100%;
+  max-width: 300px;
+  padding: 2rem;
+  border: 1px solid var(--uno-blue);
+}
+
+@media (max-width: 600px) {
+  .lobby-card {
+    padding: 1.5rem;
+  }
+
+  .stats-card {
+    padding: 1rem;
+    width: 100%;
+  }
+}
+
+/* GAME BOARD RESPONSIVENESS */
+
+/* The main table container */
+.game-perspective-container {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 80%;
+  height: 60%;
+  transform: translate(-50%, -50%) perspective(1000px);
+}
+
+.game-table {
+  width: 100%;
+  height: 100%;
+  transform: rotateX(30deg);
+  background: radial-gradient(circle, rgba(255, 50, 50, 0.2) 0%, rgba(0, 0, 0, 0) 70%);
+  border-radius: 50%;
+  box-shadow: 0 0 100px rgba(255, 0, 0, 0.3);
+  position: relative;
+  border: 2px solid rgba(255, 255, 255, 0.05);
+}
+
+.center-area {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.direction-ring {
+  width: 350px;
+  height: 350px;
+}
+
+.color-wheel {
+  width: 180px;
+  height: 180px;
+}
+
+.draw-pile {
+  left: -140px;
+  top: 20px;
+}
+
+.discard-pile {
+  top: 80px;
+  left: 20px;
+}
+
+/* Chat Box */
+.chat-container {
+  position: fixed;
+  bottom: 20px;
+  left: 20px;
+  width: 300px;
+  height: 250px;
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
   transition: all 0.3s ease;
 }
 
-.card-animation:hover {
-  transform: translateY(-20px) scale(1.1);
-  z-index: 10;
+.chat-toggle-btn {
+  display: none;
+  /* Hidden on desktop */
+  position: fixed;
+  bottom: 20px;
+  left: 20px;
+  z-index: 101;
+  background: rgba(0, 0, 0, 0.8);
+  color: white;
+  padding: 10px;
+  border-radius: 50%;
+  width: 50px;
+  height: 50px;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Mobile Tweaks */
+@media (max-width: 768px) {
+  .game-perspective-container {
+    width: 95%;
+    height: 50%;
+  }
+
+  /* Scale down the center elements */
+  .center-area {
+    transform: translate(-50%, -50%) scale(0.65);
+  }
+
+  /* Adjust Hand */
+  .my-hand-container {
+    bottom: -10px !important;
+    height: 180px !important;
+    width: 100% !important;
+  }
+
+  /* Chat defaults to collapsed/hidden or full screen modal style */
+  .chat-container {
+    left: -320px;
+    /* Hide offscreen */
+  }
+
+  .chat-container.open {
+    left: 10px;
+    bottom: 80px;
+    /* Above existing buttons */
+    width: 280px;
+    height: 200px;
+    background: rgba(0, 0, 0, 0.9);
+  }
+
+  .chat-toggle-btn {
+    display: flex;
+  }
+
+  /* Buttons reposition */
+  .game-actions-container {
+    bottom: 20px !important;
+    right: 10px !important;
+    transform: scale(0.8);
+    transform-origin: bottom right;
+  }
+}
+
+@media (max-width: 480px) {
+  .center-area {
+    transform: translate(-50%, -50%) scale(0.5);
+  }
+
+  .game-perspective-container {
+    height: 40%;
+  }
+}
+
+/* Custom Red Scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: rgba(0, 0, 0, 0.3);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--uno-red);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #ff0000;
 }

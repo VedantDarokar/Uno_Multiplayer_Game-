@@ -8,6 +8,13 @@ const COLORS = {
     black: '#2d2d2d'
 };
 
+const getDisplayValue = (val) => {
+    if (val === 'reverse') return '⇄';
+    if (val === 'skip') return '⊘';
+    if (val === 'wild') return '🌈'; // Or just keep 'wild' if preferred, but icon is nice
+    return val;
+};
+
 export default function Card({ card, onClick, isPlayable, style }) {
     // If no card (e.g. back of card), show back design
     if (!card) {
@@ -62,25 +69,25 @@ export default function Card({ card, onClick, isPlayable, style }) {
                 boxShadow: '0 4px 6px rgba(0,0,0,0.3)',
                 border: '4px solid white',
                 userSelect: 'none',
-                opacity: isPlayable ? 1 : 0.6, // Dim if not playable
+                // opacity: isPlayable ? 1 : 0.6, // Removed transparency
                 ...style // Allow overriding (e.g. for rotation or absolute positioning)
             }}
         >
             <span style={{
-                fontSize: '2.5rem',
+                fontSize: card.value === 'reverse' || card.value === 'skip' ? '4rem' : '3rem', // Larger for symbols
                 fontWeight: '900',
                 color: 'white',
                 textShadow: '2px 2px 0px rgba(0,0,0,0.2)'
             }}>
-                {card.value}
+                {getDisplayValue(card.value)}
             </span>
 
             {/* Small corner values */}
-            <span style={{ position: 'absolute', top: '5px', left: '5px', fontSize: '1rem', fontWeight: 'bold', color: 'white' }}>
-                {card.value}
+            <span style={{ position: 'absolute', top: '5px', left: '5px', fontSize: '1.2rem', fontWeight: 'bold', color: 'white' }}>
+                {getDisplayValue(card.value)}
             </span>
-            <span style={{ position: 'absolute', bottom: '5px', right: '5px', fontSize: '1rem', fontWeight: 'bold', color: 'white', transform: 'rotate(180deg)' }}>
-                {card.value}
+            <span style={{ position: 'absolute', bottom: '5px', right: '5px', fontSize: '1.2rem', fontWeight: 'bold', color: 'white', transform: 'rotate(180deg)' }}>
+                {getDisplayValue(card.value)}
             </span>
 
             {/* Center Oval */}
