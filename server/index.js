@@ -1,7 +1,9 @@
+require('dotenv').config();
 const express = require('express');
 const http = require('http');
 const { Server } = require("socket.io");
 const cors = require('cors');
+const path = require('path');
 
 const app = express();
 app.use(cors());
@@ -9,7 +11,7 @@ app.use(cors());
 const server = http.createServer(app);
 const io = new Server(server, {
     cors: {
-        origin: "*", // Allow all origins for simplicity in dev, refine for prod
+        origin: process.env.CLIENT_URL || "*", // Use env var for prod, * for dev
         methods: ["GET", "POST"]
     }
 });
@@ -18,9 +20,9 @@ const mongoose = require('mongoose');
 const User = require('./models/User');
 const Game = require('./models/Game');
 
-// Connect to MongoDB (Ensure you have a local instance or update URI)
+// Connect to MongoDB
 let isDbConnected = false;
-mongoose.connect('mongodb://127.0.0.1:27017/uno')
+mongoose.connect(process.env.MONGO_URI || 'mongodb://127.0.0.1:27017/uno')
     .then(() => {
         console.log('MongoDB Connected');
         isDbConnected = true;
@@ -34,6 +36,17 @@ app.get('/api/leaderboard', async (req, res) => {
         res.json(topPlayers);
     } catch (err) {
         res.status(500).json({ error: 'Failed to fetch leaderboard' });
+    }
+});
+
+app.get('/api/my-stats', async (req, res) => {
+    if (!isDbConnected) return res.json({ wins: 0, matchesPlayed: 0, totalScore: 0 });
+    try {
+        const ip = req.ip || req.connection.remoteAddress;
+        const user = await User.findOne({ ip });
+        res.json(user || { wins: 0, matchesPlayed: 0, totalScore: 0 });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
     }
 });
 
@@ -82,10 +95,11 @@ const socketRoomMap = {};
 io.on('connection', (socket) => {
     console.log('User connected:', socket.id);
 
-    socket.on('createRoom', ({ name }) => {
+    socket.on('createRoom', ({ name, aiMode }) => {
         const roomCode = Math.random().toString(36).substring(2, 8).toUpperCase();
+        const ip = socket.handshake.address;
         rooms[roomCode] = {
-            players: [{ id: socket.id, name, hand: [], saidUno: false, connected: true }],
+            players: [{ id: socket.id, name, ip, hand: [], saidUno: false, connected: true }],
             deck: generateDeck(),
             discardPile: [],
             currentPlayerIndex: 0,
@@ -94,6 +108,22 @@ io.on('connection', (socket) => {
         };
         socketRoomMap[socket.id] = roomCode;
         socket.join(roomCode);
+
+        // AI Mode: Add 3 Bots immediately
+        if (aiMode) {
+            const botNames = ["Bot Alpha", "Bot Beta", "Bot Gamma"];
+            botNames.forEach((bName, i) => {
+                rooms[roomCode].players.push({
+                    id: `bot-${Date.now()}-${i}`,
+                    name: bName,
+                    hand: [],
+                    saidUno: false,
+                    connected: true,
+                    isBot: true
+                });
+            });
+        }
+
         socket.emit('roomCreated', { roomCode, name });
         io.to(roomCode).emit('playerListUpdate', rooms[roomCode].players);
     });
@@ -138,18 +168,39 @@ io.on('connection', (socket) => {
             socket.emit('error', { message: 'Game has already started' });
             return;
         }
-        if (room.players.length >= 4) {
+        if (room.players.length >= 6) {
             console.log(`[Join Failed] Room ${roomCode} is full`);
             socket.emit('error', { message: 'Room is full' });
             return;
         }
 
-        room.players.push({ id: socket.id, name, hand: [], saidUno: false, connected: true });
+        room.players.push({ id: socket.id, name, ip: socket.handshake.address, hand: [], saidUno: false, connected: true });
         socketRoomMap[socket.id] = roomCode;
         socket.join(roomCode);
         socket.emit('roomJoined', { roomCode });
         io.to(roomCode).emit('playerListUpdate', room.players);
         console.log(`[Join Success] ${name} joined ${roomCode}`);
+    });
+
+    socket.on('addBot', ({ roomCode }) => {
+        const room = rooms[roomCode];
+        if (!room || room.status !== 'waiting') return;
+        if (room.players.length >= 6) return; // Limit 6
+
+        const botNames = ["Bot Alpha", "Bot Beta", "Bot Gamma", "Bot Delta", "Bot Epsilon"];
+        const usedNames = room.players.map(p => p.name);
+        const name = botNames.find(n => !usedNames.includes(n)) || `Bot ${Math.floor(Math.random() * 1000)}`;
+
+        const botUser = {
+            id: `bot-${Date.now()}-${Math.random()}`,
+            name,
+            hand: [],
+            saidUno: false,
+            connected: true,
+            isBot: true
+        };
+        room.players.push(botUser);
+        io.to(roomCode).emit('playerListUpdate', room.players);
     });
 
     socket.on('startGame', ({ roomCode }) => {
@@ -162,21 +213,50 @@ io.on('connection', (socket) => {
                 player.hand = room.deck.splice(0, 7);
             });
 
-            // Start Discard Pile
+            // Start Discard Pile - Ensure first isn't Wild (simplified)
             let firstCard = room.deck.shift();
-            while (firstCard.color === 'black') {
+            while (firstCard.type === 'wild') { // Reshuffle if wild/draw4
                 room.deck.push(firstCard);
                 room.deck.sort(() => Math.random() - 0.5);
                 firstCard = room.deck.shift();
             }
             room.discardPile.push(firstCard);
 
+            // Apply first card effect if action
+            if (firstCard.value === 'skip') {
+                room.currentPlayerIndex = (room.currentPlayerIndex + room.direction + room.players.length) % room.players.length;
+            } else if (firstCard.value === 'reverse') {
+                if (room.players.length === 2) {
+                    room.currentPlayerIndex = (room.currentPlayerIndex + room.direction + room.players.length) % room.players.length;
+                } else {
+                    room.direction *= -1;
+                    // For reverse, the current player (dealer/0) is effectively "playing" it, so play moves to LAST player?
+                    // Standard UNO: Dealer flips. Left of dealer plays.
+                    // Index 0 = Host. 
+                    // Let's assume Index 0 starts.
+                    // Reverse -> Index 0 is skipped? No.
+                    // Standard: "Dealer left starts".
+                    // If Reverse: "Dealer right starts".
+                    // We'll keep it simple: Index 0 starts. 
+                    // If Reverse at start: direction flips, Index 0 plays. Next is Last player.
+                }
+            } else if (firstCard.value === '+2') {
+                // First player draws 2 and loses turn.
+                const p = room.players[room.currentPlayerIndex];
+                p.hand.push(...room.deck.splice(0, 2));
+                room.currentPlayerIndex = (room.currentPlayerIndex + room.direction + room.players.length) % room.players.length;
+            }
+
+            // Set Color
+            room.currentColor = firstCard.color;
+
             io.to(roomCode).emit('gameStart', {
                 discardPile: room.discardPile,
-                currentColor: firstCard.color
+                currentColor: room.currentColor
             });
 
             updateGameState(roomCode);
+            handleBotTurn(roomCode, io);
         }
     });
 
@@ -240,7 +320,28 @@ io.on('connection', (socket) => {
 
             // Check Win
             if (player.hand.length === 0) {
-                io.to(roomCode).emit('gameOver', { winner: player.name });
+                // Calculate Score
+                let totalScore = 0;
+                const pointsBreakdown = [];
+
+                room.players.forEach(p => {
+                    if (p.id !== player.id) {
+                        let pScore = 0;
+                        p.hand.forEach(c => {
+                            if (c.type === 'number') pScore += parseInt(c.value);
+                            else if (c.type === 'action') pScore += 20;
+                            else if (c.type === 'wild') pScore += 50;
+                        });
+                        totalScore += pScore;
+                        pointsBreakdown.push({ name: p.name, points: pScore, hand: p.hand });
+                    }
+                });
+
+                io.to(roomCode).emit('gameOver', {
+                    winner: player.name,
+                    score: totalScore,
+                    breakdown: pointsBreakdown
+                });
                 room.status = 'ended';
 
                 try {
@@ -248,23 +349,95 @@ io.on('connection', (socket) => {
                         roomCode,
                         players: room.players.map(p => p.name),
                         winner: player.name,
+                        score: totalScore, // Add score to schema if possible, or just ignore for now
                         endedAt: new Date()
                     });
                     await game.save();
 
-                    await User.updateOne({ username: player.name }, { $inc: { wins: 1, matchesPlayed: 1 } }, { upsert: true });
+                    // Update stats
+                    if (!player.isBot && player.ip) {
+                        await User.updateOne(
+                            { ip: player.ip },
+                            {
+                                $set: { username: player.name },
+                                $inc: { wins: 1, matchesPlayed: 1, totalScore: totalScore }
+                            },
+                            { upsert: true }
+                        );
+                    }
                     for (const p of room.players) {
-                        if (p.name !== player.name) {
-                            await User.updateOne({ username: p.name }, { $inc: { matchesPlayed: 1 } }, { upsert: true });
+                        if (p.name !== player.name && !p.isBot && p.ip) {
+                            await User.updateOne(
+                                { ip: p.ip },
+                                {
+                                    $set: { username: p.name },
+                                    $inc: { matchesPlayed: 1 }
+                                },
+                                { upsert: true }
+                            );
                         }
                     }
                 } catch (err) {
                     console.error("Error saving game:", err);
                 }
+                return;
             } else {
                 updateGameState(roomCode);
+                handleBotTurn(roomCode, io);
             }
         }
+    });
+
+    socket.on('restartGame', ({ roomCode }) => {
+        const room = rooms[roomCode];
+        if (!room || room.status !== 'ended') return;
+
+        // Reset Room
+        room.deck = generateDeck();
+        room.discardPile = [];
+        room.players.forEach(p => {
+            p.hand = [];
+            p.saidUno = false;
+        });
+        room.currentPlayerIndex = 0;
+        room.direction = 1;
+        room.status = 'playing'; // Start immediately or wait? Implied "Play Again" means restart.
+
+        // Deal
+        room.players.forEach(player => {
+            player.hand = room.deck.splice(0, 7);
+        });
+
+        // Start Discard
+        let firstCard = room.deck.shift();
+        while (firstCard.type === 'wild') {
+            room.deck.push(firstCard);
+            room.deck.sort(() => Math.random() - 0.5);
+            firstCard = room.deck.shift();
+        }
+        room.discardPile.push(firstCard);
+
+        // Apply First Card
+        if (firstCard.value === 'skip') {
+            room.currentPlayerIndex = (room.currentPlayerIndex + room.direction + room.players.length) % room.players.length;
+        } else if (firstCard.value === 'reverse') {
+            if (room.players.length > 2) room.direction *= -1;
+            // else treat as skip? No, 2 player reverse is skip.
+            if (room.players.length === 2) room.currentPlayerIndex = (room.currentPlayerIndex + room.direction + room.players.length) % room.players.length;
+        } else if (firstCard.value === '+2') {
+            const p = room.players[room.currentPlayerIndex];
+            p.hand.push(...room.deck.splice(0, 2));
+            room.currentPlayerIndex = (room.currentPlayerIndex + room.direction + room.players.length) % room.players.length;
+        }
+
+        room.currentColor = firstCard.color;
+
+        io.to(roomCode).emit('gameStart', {
+            discardPile: room.discardPile,
+            currentColor: room.currentColor
+        });
+        updateGameState(roomCode);
+        handleBotTurn(roomCode, io);
     });
 
     socket.on('sayUno', ({ roomCode }) => {
@@ -290,6 +463,18 @@ io.on('connection', (socket) => {
         }
     });
 
+    socket.on('passTurn', ({ roomCode }) => {
+        const room = rooms[roomCode];
+        if (!room || room.status !== 'playing') return;
+        const isTurn = room.players[room.currentPlayerIndex].id === socket.id;
+        if (!isTurn) return;
+
+        room.currentPlayerIndex = (room.currentPlayerIndex + room.direction + room.players.length) % room.players.length;
+        io.to(roomCode).emit('notification', { message: `${room.players.find(p => p.id === socket.id).name} passed.` });
+        updateGameState(roomCode);
+        handleBotTurn(roomCode, io);
+    });
+
     socket.on('drawCard', ({ roomCode }) => {
         const room = rooms[roomCode];
         if (!room || room.status !== 'playing') return;
@@ -309,9 +494,25 @@ io.on('connection', (socket) => {
             player.hand.push(card);
             player.saidUno = false;
 
-            room.currentPlayerIndex = (room.currentPlayerIndex + room.direction + room.players.length) % room.players.length;
-            io.to(roomCode).emit('notification', { message: `${player.name} drew and passed.` });
+            // Check if Drawn Card is Playable
+            const topCard = room.discardPile[room.discardPile.length - 1];
+            let isValid = false;
+            // Simple validation reused (simplest form)
+            if (card.color === 'black') isValid = true;
+            else if (card.color === (room.currentColor || topCard.color)) isValid = true;
+            else if (card.value === topCard.value) isValid = true;
+
+            if (isValid) {
+                // Do NOT advance turn. User must Play or Pass.
+                io.to(roomCode).emit('notification', { message: `${player.name} drew. Play or Pass?` });
+            } else {
+                // Auto Advance
+                room.currentPlayerIndex = (room.currentPlayerIndex + room.direction + room.players.length) % room.players.length;
+                io.to(roomCode).emit('notification', { message: `${player.name} drew and passed.` });
+            }
+
             updateGameState(roomCode);
+            handleBotTurn(roomCode, io);
         }
     });
 
@@ -349,6 +550,17 @@ io.on('connection', (socket) => {
                 players: room.players,
                 isPlayer: false
             });
+        }
+    });
+
+    // Chat Logic
+    socket.on('sendMessage', ({ roomCode, message }) => {
+        const room = rooms[roomCode];
+        if (room) {
+            const player = room.players.find(p => p.id === socket.id);
+            if (player) {
+                io.to(roomCode).emit('receiveMessage', { sender: player.name, text: message });
+            }
         }
     });
 
@@ -397,6 +609,308 @@ function updateGameState(roomCode) {
     });
 }
 
-server.listen(4000, '0.0.0.0', () => {
-    console.log('Server running on port 4000');
+const BOT_DELAY = 1500;
+
+function handleBotTurn(roomCode, io) {
+    const room = rooms[roomCode];
+    if (!room || room.status !== 'playing') return;
+
+    const player = room.players[room.currentPlayerIndex];
+    if (!player || !player.isBot) return;
+
+    console.log(`[Bot] ${player.name} is thinking...`);
+
+    setTimeout(async () => {
+        // Double check state hasn't changed drastically
+        if (rooms[roomCode]?.currentPlayerIndex !== room.currentPlayerIndex) return;
+
+        // 1. Identify Valid Cards
+        const topCard = room.discardPile[room.discardPile.length - 1];
+        const validCards = player.hand.map((card, index) => {
+            let isValid = false;
+            if (card.color === 'black') isValid = true;
+            else if (card.color === (room.currentColor || topCard.color)) isValid = true;
+            else if (card.value === topCard.value) isValid = true;
+            return isValid ? { card, index } : null;
+        }).filter(c => c !== null);
+
+        // 2. Decide Move
+        if (validCards.length > 0) {
+            // Pick strategic card? High value or specific action?
+            // Simple: Pick first valid (or random valid)
+            const move = validCards[Math.floor(Math.random() * validCards.length)];
+            const { card, index } = move;
+
+            console.log(`[Bot] ${player.name} plays ${card.color} ${card.value}`);
+
+            player.hand.splice(index, 1);
+            room.discardPile.push(card);
+
+            // Handle Wild Color Choice (Random valid color)
+            let chosenColor = null;
+            if (card.color === 'black') {
+                const colors = ['red', 'blue', 'green', 'yellow'];
+                // Choose color present in hand
+                const handColors = player.hand.filter(c => c.color !== 'black').map(c => c.color);
+                chosenColor = handColors.length > 0
+                    ? handColors[Math.floor(Math.random() * handColors.length)]
+                    : colors[Math.floor(Math.random() * colors.length)];
+            }
+
+            // Apply Effects
+            if (card.value === 'skip') {
+                room.currentPlayerIndex = (room.currentPlayerIndex + room.direction + room.players.length) % room.players.length;
+            } else if (card.value === 'reverse') {
+                if (room.players.length === 2) {
+                    room.currentPlayerIndex = (room.currentPlayerIndex + room.direction + room.players.length) % room.players.length;
+                } else {
+                    room.direction *= -1;
+                }
+            } else if (card.value === '+2') {
+                const nextPlayerIndex = (room.currentPlayerIndex + room.direction + room.players.length) % room.players.length;
+                const nextPlayer = room.players[nextPlayerIndex];
+                nextPlayer.hand.push(...room.deck.splice(0, 2));
+                room.currentPlayerIndex = (room.currentPlayerIndex + room.direction + room.players.length) % room.players.length;
+            } else if (card.value === 'wild') {
+                room.currentColor = chosenColor;
+            } else if (card.value === '+4') {
+                room.currentColor = chosenColor;
+                const nextPlayerIndex = (room.currentPlayerIndex + room.direction + room.players.length) % room.players.length;
+                const nextPlayer = room.players[nextPlayerIndex];
+                nextPlayer.hand.push(...room.deck.splice(0, 4));
+                room.currentPlayerIndex = (room.currentPlayerIndex + room.direction + room.players.length) % room.players.length;
+            } else {
+                room.currentColor = card.color;
+            }
+
+            // Advance Turn (if not skipped/effected already handled above logic is slightly diff from original PlayCard... 
+            // Original PlayCard handled advancement IN the effect blocks for skip/+2.
+            // But basic cards fall through.
+            // Let's match original logic structure to be safe.
+            if (card.value !== 'skip' && card.value !== 'reverse' && card.value !== '+2' && card.value !== '+4') {
+                room.currentPlayerIndex = (room.currentPlayerIndex + room.direction + room.players.length) % room.players.length;
+                room.currentPlayerIndex = (room.currentPlayerIndex + room.direction + room.players.length) % room.players.length; // Wait, why twice?
+                // Original logic lines 238: index = ...
+                // Actually original logic seemed to have a bug or I misread?
+                // Line 238: `room.currentPlayerIndex = (room.currentPlayerIndex + ...)`
+                // Oh, looking at original PlayCard:
+                // skip: advances twice? "currentPlayerIndex = ...; currentPlayerIndex = ..." (lines 210-211).
+                // Ah, ONE advance is "Action", SECOND is "Next Player".
+                // In UNO, Skip means: Active Player plays Skip. Next player is skipped. Turn goes to Player After.
+                // So: Current -> Target (Skipped) -> Next.
+                // Correct logic: Advance ONCE effectively skips if we don't process their turn. 
+                // But simply index += 2?
+                // Original code:
+                // 210: index = index + dir
+                // 211: index = index + dir
+                // Yes, it skips the immediate next.
+
+                // However, for Normal cards (Line 238):
+                // One advance.
+                // Wait, original Line 238 seems to index = index + dir.
+                // Checks out.
+
+                // BUT: My logic above for Skip/+2 used ONE advance line in some cases?
+                // Let's re-verify:
+                // Skip: I did `room.currentPlayerIndex = ...`. Check orig: It did it TWICE.
+                // I should match original.
+            }
+            // Wait, my bot logic above for 'skip' only advanced ONCE. I need to fix that.
+
+            // Re-evaluating Index Logic
+            // Standard "Next Turn": Index + Direction.
+            // Skip: Index + Direction * 2.
+            // +2: Next player draws. Then Index + Direction * 2? Or does +2 skip them? 
+            // Rule: "Next player draws 2 cards and loses their turn". So yes, skip them.
+            // Original code +2 (220): NextPlayer gets cards (223). Then index updated (224), then updated AGAIN (225).
+            // So YES, original code skips the person who drew.
+
+            // Fix Bot Logic:
+            if (card.value === 'skip') {
+                room.currentPlayerIndex = (room.currentPlayerIndex + 2 * room.direction + 2 * room.players.length) % room.players.length;
+            } else if (card.value === 'reverse') {
+                if (room.players.length === 2) {
+                    room.currentPlayerIndex = (room.currentPlayerIndex + 2 * room.direction + 2 * room.players.length) % room.players.length;
+                } else {
+                    room.direction *= -1;
+                    room.currentPlayerIndex = (room.currentPlayerIndex + room.direction + room.players.length) % room.players.length;
+                }
+            } else if (card.value === '+2') {
+                // Victim
+                const victimIndex = (room.currentPlayerIndex + room.direction + room.players.length) % room.players.length;
+                room.players[victimIndex].hand.push(...room.deck.splice(0, 2));
+                // Skip victim
+                room.currentPlayerIndex = (room.currentPlayerIndex + 2 * room.direction + 2 * room.players.length) % room.players.length;
+            } else if (card.value === 'wild') {
+                room.currentColor = chosenColor;
+                room.currentPlayerIndex = (room.currentPlayerIndex + room.direction + room.players.length) % room.players.length;
+            } else if (card.value === '+4') {
+                room.currentColor = chosenColor;
+                const victimIndex = (room.currentPlayerIndex + room.direction + room.players.length) % room.players.length;
+                room.players[victimIndex].hand.push(...room.deck.splice(0, 4));
+                // Skip
+                room.currentPlayerIndex = (room.currentPlayerIndex + 2 * room.direction + 2 * room.players.length) % room.players.length;
+            } else {
+                // Normal
+                room.currentPlayerIndex = (room.currentPlayerIndex + room.direction + room.players.length) % room.players.length;
+            }
+
+            // Say UNO?
+            if (player.hand.length === 1) {
+                // Bots rarely forget, but maybe add 10% chance to forget?
+                if (Math.random() > 0.1) {
+                    player.saidUno = true;
+                    io.to(roomCode).emit('notification', { message: `${player.name} said UNO!` });
+                }
+            }
+
+            // Check Win
+            if (player.hand.length === 0) {
+                // Calculate Score
+                let totalScore = 0;
+                const pointsBreakdown = [];
+
+                room.players.forEach(p => {
+                    if (p.id !== player.id) {
+                        let pScore = 0;
+                        p.hand.forEach(c => {
+                            if (c.type === 'number') pScore += parseInt(c.value);
+                            else if (c.type === 'action') pScore += 20;
+                            else if (c.type === 'wild') pScore += 50;
+                        });
+                        totalScore += pScore;
+                        pointsBreakdown.push({ name: p.name, points: pScore, hand: p.hand });
+                    }
+                });
+
+                io.to(roomCode).emit('gameOver', {
+                    winner: player.name,
+                    score: totalScore,
+                    breakdown: pointsBreakdown
+                });
+                room.status = 'ended';
+
+                // Save Game Logic
+                try {
+                    const game = new Game({
+                        roomCode,
+                        players: room.players.map(p => p.name),
+                        winner: player.name,
+                        score: totalScore,
+                        endedAt: new Date()
+                    });
+                    await game.save();
+
+                    if (!player.isBot && player.ip) {
+                        await User.updateOne(
+                            { ip: player.ip },
+                            {
+                                $set: { username: player.name },
+                                $inc: { wins: 1, matchesPlayed: 1, totalScore: totalScore }
+                            },
+                            { upsert: true }
+                        );
+                    }
+                    for (const p of room.players) {
+                        if (p.name !== player.name && !p.isBot && p.ip) {
+                            await User.updateOne(
+                                { ip: p.ip },
+                                {
+                                    $set: { username: p.name },
+                                    $inc: { matchesPlayed: 1 }
+                                },
+                                { upsert: true }
+                            );
+                        }
+                    }
+                } catch (err) {
+                    console.error("Error saving game:", err);
+                }
+                return;
+            }
+
+        } else {
+            // Draw
+            console.log(`[Bot] ${player.name} draws.`);
+            if (room.deck.length === 0) {
+                const top = room.discardPile.pop();
+                room.deck = room.discardPile.map(c => ({ ...c })).sort(() => Math.random() - 0.5);
+                room.discardPile = [top];
+            }
+            if (room.deck.length > 0) {
+                const card = room.deck.shift();
+                player.hand.push(card);
+                player.saidUno = false;
+
+                // Can play drawn card?
+                // Logic: If playable, play immediately (Bot always plays if beneficial/valid).
+                // Check validity
+                const topCard = room.discardPile[room.discardPile.length - 1]; // Re-check top (didn't change but good practice)
+                let isValid = false;
+                if (card.color === 'black') isValid = true;
+                else if (card.color === (room.currentColor || topCard.color)) isValid = true;
+                else if (card.value === topCard.value) isValid = true;
+
+                if (isValid) {
+                    // Play it!
+                    // Recursive call? Or just handle here?
+                    // Just handle here to avoid deep recursion or delay.
+                    console.log(`[Bot] ${player.name} plays drawn ${card.color} ${card.value}`);
+                    player.hand.pop(); // Remove the card we just added
+                    room.discardPile.push(card);
+                    // Logic for effects again...
+                    // DRY violation but safe for now.
+                    // Copy-paste effect logic.
+
+                    // Helper for Effect Logic?
+                    // I'll just do minimal for now or recursing is slightly safer if I reset index?
+                    // No, "Play Immediately" usually implies part of same turn context.
+                    // But simpler: Just advance turn if I can't play.
+                    // If I CAN play, I'll play it.
+
+                    // To avoid massive code duplication, I'll just ADVANCE turn here.
+                    // The bot is "Dumb" on draw -> It draws and passes.
+                    // User requirement: "If playable, you MAY play it".
+                    // Ideally I should play it.
+                    // Let's implement Play logic for drawn card.
+
+                    // ... Effect Logic Duplication ...
+                    // Actually, I'll just call `handleBotTurn` again immediately? 
+                    // No, because `handleBotTurn` expects `currentPlayer` to be bot.
+                    // If I haven't advanced index, it is still bot.
+                    // So if I don't advance index, and call `handleBotTurn` again, it will find the new card and play it.
+                    // BUT I added delay.
+                    // So: Draw -> Don't advance -> Call `handleBotTurn`.
+                    // It will wait 1.5s then play.
+                    // This looks natural! "Draws... Thinks... Plays".
+                    updateGameState(roomCode);
+                    handleBotTurn(roomCode, io);
+                    return;
+                }
+
+                // If not valid, advance
+                room.currentPlayerIndex = (room.currentPlayerIndex + room.direction + room.players.length) % room.players.length;
+                io.to(roomCode).emit('notification', { message: `${player.name} drew and passed.` });
+            }
+        }
+
+        updateGameState(roomCode);
+        handleBotTurn(roomCode, io); // Trigger next player (if bot)
+
+    }, BOT_DELAY);
+}
+
+// Serve static assets in production
+if (process.env.NODE_ENV === 'production') {
+    // Set static folder
+    app.use(express.static(path.join(__dirname, '../client/dist')));
+
+    app.get('*', (req, res) => {
+        res.sendFile(path.resolve(__dirname, '../client/dist', 'index.html'));
+    });
+}
+
+const PORT = process.env.PORT || 4000;
+server.listen(PORT, '0.0.0.0', () => {
+    console.log(`Server running on port ${PORT}`);
 });
