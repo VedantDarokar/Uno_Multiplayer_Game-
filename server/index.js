@@ -6,13 +6,23 @@ const cors = require('cors');
 const path = require('path');
 
 const app = express();
-app.use(cors());
+
+const clientUrl = process.env.CLIENT_URL || "*";
+const allowedOrigins = clientUrl === "*"
+    ? "*"
+    : clientUrl.split(',').map(url => url.trim().replace(/\/$/, ""));
+
+app.use(cors({
+    origin: allowedOrigins,
+    credentials: true
+}));
 
 const server = http.createServer(app);
 const io = new Server(server, {
     cors: {
-        origin: process.env.CLIENT_URL || "*", // Use env var for prod, * for dev
-        methods: ["GET", "POST"]
+        origin: allowedOrigins,
+        methods: ["GET", "POST"],
+        credentials: true
     }
 });
 
