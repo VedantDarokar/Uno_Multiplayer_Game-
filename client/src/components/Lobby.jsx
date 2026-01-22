@@ -71,49 +71,36 @@ export default function Lobby() {
                         <div style={{ flex: 1, height: '1px', background: '#444' }}></div>
                     </div>
 
-                    <div style={{ display: 'flex', gap: '0.5rem' }}>
+                    <div style={{ display: 'flex', gap: '0.5rem', width: '100%', whiteSpace: 'nowrap' }}>
                         <input
                             type="text"
-                            placeholder="Room Code"
+                            placeholder="CODE"
                             value={roomCode}
                             onChange={e => setRoomCode(e.target.value.toUpperCase())}
                             style={{
                                 flex: 1,
+                                minWidth: '0',
                                 padding: '12px',
                                 borderRadius: '8px',
                                 border: 'none',
                                 background: 'rgba(255,255,255,0.1)',
                                 color: 'white',
                                 fontSize: '1rem',
-                                textTransform: 'uppercase'
+                                textTransform: 'uppercase',
+                                textAlign: 'center'
                             }}
                         />
                         <button
                             onClick={joinRoom}
                             className="btn-primary"
-                            style={{ padding: '0 25px' }}
+                            style={{ flex: '0 0 auto', padding: '12px 20px', fontSize: '1rem' }}
                         >
-                            Join
+                            JOIN
                         </button>
                     </div>
                 </div>
             </div>
 
-            {/* Bottom Panel */}
-            <div style={{
-                display: 'flex', gap: '20px', alignItems: 'flex-start',
-                justifyContent: 'center', flexWrap: 'wrap', width: '100%'
-            }}>
-                {/* Personal Stats */}
-                {myStats && (
-                    <div className="glass stats-card">
-                        <h2 style={{ color: 'var(--uno-blue)', marginBottom: '1rem', borderBottom: '1px solid #444', paddingBottom: '10px' }}>Your Stats</h2>
-                        <div style={{ marginBottom: '10px', fontSize: '1.2rem' }}>Wins: <span style={{ color: 'var(--uno-green)', fontWeight: 'bold' }}>{myStats.wins}</span></div>
-                        <div style={{ marginBottom: '10px' }}>Matches: {myStats.matchesPlayed}</div>
-                        <div style={{ marginBottom: '10px' }}>Total Score: {myStats.totalScore || 0}</div>
-                    </div>
-                )}
-            </div>
         </div>
     );
 }

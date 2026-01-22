@@ -105,6 +105,18 @@ button {
     padding: 1.5rem;
   }
 
+  .lobby-card input,
+  .lobby-card button {
+    font-size: 0.9rem !important;
+    /* Smaller font on mobile */
+    padding: 10px !important;
+    /* Reducing padding too */
+  }
+
+  .lobby-card h1 {
+    font-size: 2rem !important;
+  }
+
   .stats-card {
     padding: 1rem;
     width: 100%;
@@ -167,7 +179,8 @@ button {
 /* Chat Box */
 .chat-container {
   position: fixed;
-  bottom: 20px;
+  top: 80px;
+  /* Opens below the button */
   left: 20px;
   width: 300px;
   height: 250px;
@@ -179,9 +192,21 @@ button {
 
 .chat-toggle-btn {
   display: none;
-  /* Hidden on desktop */
+  /* Hidden on desktop usually, but if we made it visible everywhere in previous steps? logic check: In Game.jsx we render it always? logic check says yes in recent edits. 
+     Wait, the CSS says `display: none` then mobile `display: flex`. 
+     But the user functionality "red dot" implies they use it.
+     If `display: none` on desktop, they can't see the button!
+     The user's previous request "red dot able to see" implies they CAN see the button or want to.
+     The `Game.jsx` renders `<button className="chat-toggle-btn" ...>`
+     If this CSS hides it on desktop, they can't chat on desktop?
+     I should probably fix `display` to `flex` on desktop too if it's the primary chat access.
+     Or `display: flex` always.
+  */
+  display: flex;
+  /* Make visible always */
   position: fixed;
-  bottom: 20px;
+  top: 20px;
+  /* Top Left */
   left: 20px;
   z-index: 101;
   background: rgba(0, 0, 0, 0.8);
@@ -217,12 +242,16 @@ button {
   .chat-container {
     left: -320px;
     /* Hide offscreen */
+    top: 70px;
+    /* Below button on mobile */
+    bottom: auto;
+    /* Clear bottom */
   }
 
   .chat-container.open {
     left: 10px;
-    bottom: 80px;
-    /* Above existing buttons */
+    top: 70px;
+    bottom: auto;
     width: 280px;
     height: 200px;
     background: rgba(0, 0, 0, 0.9);

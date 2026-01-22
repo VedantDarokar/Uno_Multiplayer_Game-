@@ -26,6 +26,20 @@ export default function Game() {
     const [messages, setMessages] = useState([]);
     const [chatInput, setChatInput] = useState('');
     const [isChatOpen, setIsChatOpen] = useState(false);
+    const [unreadCount, setUnreadCount] = useState(0);
+    const chatOpenRef = useRef(isChatOpen);
+
+    // Sync Ref with State
+    useEffect(() => {
+        chatOpenRef.current = isChatOpen;
+    }, [isChatOpen]);
+
+    const toggleChat = () => {
+        if (!isChatOpen) {
+            setUnreadCount(0);
+        }
+        setIsChatOpen(!isChatOpen);
+    };
 
     useEffect(() => {
         if (gameState && gameState.currentPlayerName !== players.find(p => p.id === socket.id)?.name) {
@@ -100,6 +114,9 @@ export default function Game() {
 
         socket.on('receiveMessage', (msg) => {
             setMessages(prev => [...prev, msg].slice(-20)); // Keep last 20
+            if (!chatOpenRef.current) {
+                setUnreadCount(prev => prev + 1);
+            }
         });
 
         // Initial Sync: Check if we are already in the room or need to join
@@ -502,12 +519,16 @@ export default function Game() {
             <div style={{
                 position: 'absolute', top: '20px', left: '50%', transform: 'translateX(-50%)',
                 background: myTurn ? (gameState.drawPenalty > 0 ? 'linear-gradient(90deg, transparent, #ff5555, transparent)' : 'linear-gradient(90deg, transparent, #4ade80, transparent)') : 'transparent',
-                padding: '10px 100px',
-                color: 'white', fontWeight: 'bold', fontSize: '1.5rem',
+                width: '100%',
+                textAlign: 'center',
+                padding: '10px 0',
+                color: 'white', fontWeight: 'bold', fontSize: 'clamp(1rem, 5vw, 1.5rem)',
                 textShadow: '0 2px 4px black',
-                zIndex: 50
+                zIndex: 50,
+                whiteSpace: 'nowrap',
+                pointerEvents: 'none'
             }}>
-                {myTurn ? (gameState.drawPenalty > 0 ? `⚠️ PENALTY: DRAW ${gameState.drawPenalty} OR STACK! ⚠️` : "⚠️ YOUR TURN ⚠️") : `${gameState.currentPlayerName.toUpperCase()}'S TURN`}
+                {myTurn ? (gameState.drawPenalty > 0 ? `⚠️ DRAW ${gameState.drawPenalty} OR STACK! ⚠️` : "⚠️ YOUR TURN ⚠️") : `${gameState.currentPlayerName.toUpperCase()}'S TURN`}
             </div>
 
             {/* Opponents (2D Overlay) */}
@@ -742,7 +763,21 @@ export default function Game() {
                 </div>
             )}
             {/* Chat Box - Bottom Left */}
-            <button className="chat-toggle-btn" onClick={() => setIsChatOpen(!isChatOpen)}>💬</button>
+            <button className="chat-toggle-btn" onClick={toggleChat} style={{ position: 'relative' }}>
+                💬
+                {unreadCount > 0 && (
+                    <span style={{
+                        position: 'absolute', top: '-5px', right: '-5px',
+                        background: 'red', color: 'white',
+                        borderRadius: '50%', width: '20px', height: '20px',
+                        fontSize: '0.8rem', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        border: '2px solid white'
+                    }}>
+                        {unreadCount}
+                    </span>
+                )}
+            </button>
+
             <div className={`glass chat-container ${isChatOpen ? 'open' : ''}`}>
                 {/* Messages Area */}
                 <div style={{
