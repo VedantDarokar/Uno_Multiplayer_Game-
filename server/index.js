@@ -996,26 +996,18 @@ function handleBotTurn(roomCode, io) {
 }
 
 // Serve static assets in production
-if (process.env.NODE_ENV === 'production') {
-    // Set static folder
-    app.use(express.static(path.join(__dirname, '../client/dist')));
+// Serve static assets (Deployment)
+const clientBuildPath = path.join(__dirname, '../client/dist');
+const fs = require('fs');
 
+if (fs.existsSync(clientBuildPath)) {
+    app.use(express.static(clientBuildPath));
     app.get('*', (req, res) => {
-        res.sendFile(path.resolve(__dirname, '../client/dist', 'index.html'));
+        res.sendFile(path.resolve(clientBuildPath, 'index.html'));
     });
-} else {
-    // Development fallback for users accidentally hitting backend URL
-    app.get('/game/:roomCode', (req, res) => {
-        // If the user tries to open the game on port 4000 (Backend) in dev mode,
-        // it won't work because the React app is served by Vite on a different port (usually 5173).
-        // specific instruction to user
-        res.type('html').send(`
-            <h1>Wrong Port!</h1>
-            <p>You are accessing the <b>Backend Server</b> directly (Port ${process.env.PORT || 4000}).</p>
-            <p>Please use the <b>Client URL</b> (usually Port 5173) to play the game.</p>
-            <p>Try: <a href="http://${req.hostname}:5173${req.url}">http://${req.hostname}:5173${req.url}</a></p>
-        `);
-    });
+} else if (process.env.NODE_ENV === 'production') {
+    // If production but path not found, log error
+    console.error("Production build not found at: ", clientBuildPath);
 }
 
 const PORT = process.env.PORT || 4000;

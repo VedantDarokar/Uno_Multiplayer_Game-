@@ -26,19 +26,6 @@ export default function Game() {
     const [messages, setMessages] = useState([]);
     const [chatInput, setChatInput] = useState('');
     const [isChatOpen, setIsChatOpen] = useState(false);
-    const [unreadCount, setUnreadCount] = useState(0);
-
-    useEffect(() => {
-        if (isChatOpen) {
-            setUnreadCount(0);
-        }
-    }, [isChatOpen, messages]);
-
-    useEffect(() => {
-        if (!isChatOpen && messages.length > 0) {
-            setUnreadCount(prev => prev + 1);
-        }
-    }, [messages]);
 
     useEffect(() => {
         if (gameState && gameState.currentPlayerName !== players.find(p => p.id === socket.id)?.name) {
@@ -488,8 +475,14 @@ export default function Game() {
             </div>
 
             {/* Turn Indicator (Banner at Top) */}
-            {/* Turn Indicator (Banner at Top) */}
-            <div className={`turn-banner ${myTurn ? (gameState.drawPenalty > 0 ? 'penalty' : 'my-turn') : ''}`}>
+            <div style={{
+                position: 'absolute', top: '20px', left: '50%', transform: 'translateX(-50%)',
+                background: myTurn ? (gameState.drawPenalty > 0 ? 'linear-gradient(90deg, transparent, #ff5555, transparent)' : 'linear-gradient(90deg, transparent, #4ade80, transparent)') : 'transparent',
+                padding: '10px 100px',
+                color: 'white', fontWeight: 'bold', fontSize: '1.5rem',
+                textShadow: '0 2px 4px black',
+                zIndex: 50
+            }}>
                 {myTurn ? (gameState.drawPenalty > 0 ? `⚠️ PENALTY: DRAW ${gameState.drawPenalty} OR STACK! ⚠️` : "⚠️ YOUR TURN ⚠️") : `${gameState.currentPlayerName.toUpperCase()}'S TURN`}
             </div>
 
@@ -499,26 +492,56 @@ export default function Game() {
                 const isOpTurn = gameState.currentPlayerName === op.name;
 
                 return (
-                    <div key={i}
-                        className={`opponent-container ${isOpTurn ? 'active' : ''} ${!op.connected ? 'disconnected' : ''}`}
-                        style={{ ...posStyle, zIndex: 20 }}
-                    >
-                        <div className="opponent-content">
+                    <div key={i} style={{
+                        position: 'absolute',
+                        ...posStyle,
+                        zIndex: 20
+                    }}>
+                        <div style={{
+                            display: 'flex', flexDirection: 'column', alignItems: 'center',
+                            opacity: op.connected ? 1 : 0.5,
+                            transform: isOpTurn ? 'scale(1.1)' : 'scale(1)',
+                            transition: 'all 0.3s'
+                        }}>
                             {/* Player Label */}
-                            <div className="opponent-label">
+                            <div style={{
+                                background: 'linear-gradient(to bottom, #ff9966, #ff5e62)',
+                                padding: '5px 15px', borderRadius: '15px',
+                                color: 'white', fontWeight: 'bold', fontSize: '0.9rem',
+                                marginBottom: '-10px', zIndex: 2,
+                                border: '2px solid white', boxShadow: '0 2px 5px rgba(0,0,0,0.3)'
+                            }}>
                                 {op.name}
                             </div>
 
                             {/* Avatar Box */}
-                            <div className={`opponent-avatar ${isOpTurn ? 'active-border' : ''}`}>
+                            <div style={{
+                                width: '80px', height: '80px', background: '#333',
+                                borderRadius: '10px', border: `3px solid ${isOpTurn ? '#ffff00' : 'white'}`,
+                                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                boxShadow: isOpTurn ? '0 0 20px #ffff00' : '0 4px 10px rgba(0,0,0,0.5)',
+                                overflow: 'hidden'
+                            }}>
                                 <span style={{ fontSize: '2.5rem' }}>🤖</span>
                             </div>
 
                             {/* Card Count Badge */}
-                            <div className="opponent-card-count">
+                            <div style={{
+                                position: 'absolute', right: '-15px', bottom: '10px',
+                                background: 'white', color: 'black', fontWeight: 'bold',
+                                width: '30px', height: '35px', borderRadius: '5px',
+                                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                border: '2px solid #ccc',
+                                boxShadow: '2px 2px 5px rgba(0,0,0,0.3)'
+                            }}>
                                 <span style={{ fontSize: '0.8rem' }}>🃏</span> {op.cards}
                             </div>
                         </div>
+
+                        {/* Catch UNO Button for this specific opponent (if needed, but we have global) */}
+                        {/* We will keep the Global one for UI cleanliness as requested before centered, but user asked for "same layout" which usually implies interaction on the player. 
+                             However, the user asked for button in bottom right. So keeping it separate is better. 
+                         */}
                     </div>
                 )
             })}
@@ -695,19 +718,7 @@ export default function Game() {
                 </div>
             )}
             {/* Chat Box - Bottom Left */}
-            <button className="chat-toggle-btn" onClick={() => setIsChatOpen(!isChatOpen)} style={{ position: 'relative' }}>
-                💬
-                {unreadCount > 0 && (
-                    <span style={{
-                        position: 'absolute', top: '-5px', right: '-5px',
-                        background: 'red', color: 'white',
-                        borderRadius: '50%', padding: '2px 6px',
-                        fontSize: '0.7rem', fontWeight: 'bold'
-                    }}>
-                        {unreadCount > 9 ? '9+' : unreadCount}
-                    </span>
-                )}
-            </button>
+            <button className="chat-toggle-btn" onClick={() => setIsChatOpen(!isChatOpen)}>💬</button>
             <div className={`glass chat-container ${isChatOpen ? 'open' : ''}`}>
                 {/* Messages Area */}
                 <div style={{
@@ -745,7 +756,6 @@ export default function Game() {
                     }}>Send</button>
                 </form>
             </div>
-
         </div>
     );
 }
