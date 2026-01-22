@@ -26,6 +26,19 @@ export default function Game() {
     const [messages, setMessages] = useState([]);
     const [chatInput, setChatInput] = useState('');
     const [isChatOpen, setIsChatOpen] = useState(false);
+    const [unreadCount, setUnreadCount] = useState(0);
+
+    useEffect(() => {
+        if (isChatOpen) {
+            setUnreadCount(0);
+        }
+    }, [isChatOpen, messages]);
+
+    useEffect(() => {
+        if (!isChatOpen && messages.length > 0) {
+            setUnreadCount(prev => prev + 1);
+        }
+    }, [messages]);
 
     useEffect(() => {
         if (gameState && gameState.currentPlayerName !== players.find(p => p.id === socket.id)?.name) {
@@ -200,21 +213,10 @@ export default function Game() {
                 {!isWinner && <h2 style={{ fontSize: '2rem', color: '#aaa' }}>Better luck next time!</h2>}
 
                 <div className="glass" style={{ padding: '2rem', marginTop: '2rem', width: '400px' }}>
-                    <h3>Game Summary</h3>
-                    <p style={{ fontSize: '1.5rem', margin: '10px 0' }}>
-                        Total Score: <span style={{ color: 'var(--uno-yellow)' }}>{gameOverData.score}</span>
-                    </p>
-
-                    <div style={{ textAlign: 'left', marginTop: '1rem' }}>
-                        <p style={{ borderBottom: '1px solid #555', paddingBottom: '5px' }}>Points Breakdown:</p>
-                        <ul style={{ listStyle: 'none', padding: 0, marginTop: '10px' }}>
-                            {gameOverData.breakdown && gameOverData.breakdown.map((p, i) => (
-                                <li key={i} style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 0' }}>
-                                    <span>{p.name}</span>
-                                    <span style={{ color: '#ff5555' }}>+{p.points}</span>
-                                </li>
-                            ))}
-                        </ul>
+                    <div style={{ textAlign: 'center', marginBottom: '20px' }}>
+                        <p style={{ fontSize: '1.2rem', color: '#ccc' }}>
+                            {isWinner ? "Great game! The lobby is still open." : "The winner takes it all!"}
+                        </p>
                     </div>
 
                     <button
@@ -486,15 +488,9 @@ export default function Game() {
             </div>
 
             {/* Turn Indicator (Banner at Top) */}
-            <div style={{
-                position: 'absolute', top: '20px', left: '50%', transform: 'translateX(-50%)',
-                background: myTurn ? 'linear-gradient(90deg, transparent, #4ade80, transparent)' : 'transparent',
-                padding: '10px 100px',
-                color: 'white', fontWeight: 'bold', fontSize: '1.5rem',
-                textShadow: '0 2px 4px black',
-                zIndex: 50
-            }}>
-                {myTurn ? "⚠️ YOUR TURN ⚠️" : `${gameState.currentPlayerName.toUpperCase()}'S TURN`}
+            {/* Turn Indicator (Banner at Top) */}
+            <div className={`turn-banner ${myTurn ? (gameState.drawPenalty > 0 ? 'penalty' : 'my-turn') : ''}`}>
+                {myTurn ? (gameState.drawPenalty > 0 ? `⚠️ PENALTY: DRAW ${gameState.drawPenalty} OR STACK! ⚠️` : "⚠️ YOUR TURN ⚠️") : `${gameState.currentPlayerName.toUpperCase()}'S TURN`}
             </div>
 
             {/* Opponents (2D Overlay) */}
@@ -503,56 +499,26 @@ export default function Game() {
                 const isOpTurn = gameState.currentPlayerName === op.name;
 
                 return (
-                    <div key={i} style={{
-                        position: 'absolute',
-                        ...posStyle,
-                        zIndex: 20
-                    }}>
-                        <div style={{
-                            display: 'flex', flexDirection: 'column', alignItems: 'center',
-                            opacity: op.connected ? 1 : 0.5,
-                            transform: isOpTurn ? 'scale(1.1)' : 'scale(1)',
-                            transition: 'all 0.3s'
-                        }}>
+                    <div key={i}
+                        className={`opponent-container ${isOpTurn ? 'active' : ''} ${!op.connected ? 'disconnected' : ''}`}
+                        style={{ ...posStyle, zIndex: 20 }}
+                    >
+                        <div className="opponent-content">
                             {/* Player Label */}
-                            <div style={{
-                                background: 'linear-gradient(to bottom, #ff9966, #ff5e62)',
-                                padding: '5px 15px', borderRadius: '15px',
-                                color: 'white', fontWeight: 'bold', fontSize: '0.9rem',
-                                marginBottom: '-10px', zIndex: 2,
-                                border: '2px solid white', boxShadow: '0 2px 5px rgba(0,0,0,0.3)'
-                            }}>
+                            <div className="opponent-label">
                                 {op.name}
                             </div>
 
                             {/* Avatar Box */}
-                            <div style={{
-                                width: '80px', height: '80px', background: '#333',
-                                borderRadius: '10px', border: `3px solid ${isOpTurn ? '#ffff00' : 'white'}`,
-                                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                                boxShadow: isOpTurn ? '0 0 20px #ffff00' : '0 4px 10px rgba(0,0,0,0.5)',
-                                overflow: 'hidden'
-                            }}>
+                            <div className={`opponent-avatar ${isOpTurn ? 'active-border' : ''}`}>
                                 <span style={{ fontSize: '2.5rem' }}>🤖</span>
                             </div>
 
                             {/* Card Count Badge */}
-                            <div style={{
-                                position: 'absolute', right: '-15px', bottom: '10px',
-                                background: 'white', color: 'black', fontWeight: 'bold',
-                                width: '30px', height: '35px', borderRadius: '5px',
-                                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                                border: '2px solid #ccc',
-                                boxShadow: '2px 2px 5px rgba(0,0,0,0.3)'
-                            }}>
+                            <div className="opponent-card-count">
                                 <span style={{ fontSize: '0.8rem' }}>🃏</span> {op.cards}
                             </div>
                         </div>
-
-                        {/* Catch UNO Button for this specific opponent (if needed, but we have global) */}
-                        {/* We will keep the Global one for UI cleanliness as requested before centered, but user asked for "same layout" which usually implies interaction on the player. 
-                             However, the user asked for button in bottom right. So keeping it separate is better. 
-                         */}
                     </div>
                 )
             })}
@@ -566,51 +532,96 @@ export default function Game() {
                     </button>
                 )}
 
-                {/* UNO Button - Rectangular Card Style */}
-                {myHandLength <= 2 && (
-                    <button onClick={sayUno} disabled={gameState.saidUno}
-                        style={{
-                            width: '120px', height: '80px',
-                            background: gameState.saidUno ? '#555' : '#e61d1d',
-                            border: '4px solid #ffd700',
-                            borderRadius: '10px',
-                            transform: 'rotate(-10deg)',
-                            boxShadow: '0 5px 15px rgba(0,0,0,0.5), 0 0 10px #ffd700',
-                            cursor: gameState.saidUno ? 'default' : 'pointer',
-                            display: 'flex', alignItems: 'center', justifyContent: 'center',
-                            transition: 'transform 0.2s',
-                            animation: !gameState.saidUno ? 'pulse 2s infinite' : 'none',
-                        }}
-                        onMouseEnter={e => !gameState.saidUno && (e.currentTarget.style.transform = 'rotate(-10deg) scale(1.1)')}
-                        onMouseLeave={e => !gameState.saidUno && (e.currentTarget.style.transform = 'rotate(-10deg) scale(1)')}
-                    >
-                        <span style={{
-                            fontFamily: "'Arial Black', 'Impact', sans-serif",
-                            fontSize: '2rem',
-                            color: '#ffd700', // Yellow text
-                            fontStyle: 'italic',
-                            textShadow: '2px 2px 0 #000, -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 3px 3px 5px rgba(0,0,0,0.5)',
-                            letterSpacing: '2px',
-                            transform: 'skewX(-10deg)'
-                        }}>
-                            {gameState.saidUno ? 'SAID' : 'UNO!'}
-                        </span>
-                    </button>
-                )}
+                {/* Unified UNO / CATCH Button */}
+                {(() => {
+                    const myPlayer = players.find(p => p.id === socket.id);
+                    const canSayUno = gameState.hand.length <= 2 && !gameState.saidUno;
+                    const catchableOpponent = gameState.opponents.find(op => op.cards === 1 && !op.saidUno);
 
-                {/* Global Catch */}
-                {gameState.opponents.some(op => op.cards === 1 && !op.saidUno) && (
-                    <button onClick={() => {
-                        const target = gameState.opponents.find(op => op.cards === 1 && !op.saidUno);
-                        if (target) catchUno(target.id);
-                    }} style={{
-                        background: '#ff0000', color: 'white', border: '3px solid white',
-                        borderRadius: '30px', padding: '10px 20px', fontWeight: 'bold',
-                        animation: 'bounce 0.8s infinite', cursor: 'pointer'
-                    }}>
-                        CATCH UNO!
-                    </button>
-                )}
+                    if (canSayUno || catchableOpponent) {
+                        const isCatchAction = !canSayUno && catchableOpponent;
+                        const actionLabel = isCatchAction ? "CATCH!" : "UNO!";
+
+                        return (
+                            <button
+                                onClick={(e) => {
+                                    e.stopPropagation(); // Prevent propagation just in case
+                                    if (isCatchAction) {
+                                        catchUno(catchableOpponent.id);
+                                    } else {
+                                        sayUno();
+                                    }
+                                }}
+                                style={{
+                                    width: '120px', height: '80px',
+                                    background: isCatchAction ? '#ff0000' : '#e61d1d',
+                                    border: '4px solid #ffd700',
+                                    borderRadius: '10px',
+                                    transform: 'rotate(-10deg)',
+                                    boxShadow: '0 5px 15px rgba(0,0,0,0.5), 0 0 10px #ffd700',
+                                    cursor: 'pointer',
+                                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                    transition: 'transform 0.2s',
+                                    animation: 'pulse 2s infinite',
+                                }}
+                                onMouseEnter={e => (e.currentTarget.style.transform = 'rotate(-10deg) scale(1.1)')}
+                                onMouseLeave={e => (e.currentTarget.style.transform = 'rotate(-10deg) scale(1)')}
+                            >
+                                <span style={{
+                                    fontFamily: "'Arial Black', 'Impact', sans-serif",
+                                    fontSize: '2rem',
+                                    color: '#ffd700',
+                                    fontStyle: 'italic',
+                                    textShadow: '2px 2px 0 #000, -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 3px 3px 5px rgba(0,0,0,0.5)',
+                                    letterSpacing: '2px',
+                                    transform: 'skewX(-10deg)'
+                                }}>
+                                    {actionLabel}
+                                </span>
+                            </button>
+                        );
+                    }
+
+                    // Specific case: I said UNO, show "SAID" state? 
+                    // Or if merged, maybe we prioritize Catch over "SAID" status display?
+                    // Original code showed disabled "SAID" button. 
+                    // If we want "Same Button" for catch, the disabled "SAID" state might block Catch?
+                    // Logic above: `!canSayUno` (which is true if I said it).
+                    // So if I said it, `canSayUno` is false.
+                    // If opponent is catchable, `catchableOpponent` is true. -> Shows CATCH.
+                    // If no one is catchable and I said it -> Should I show "SAID"?
+                    // User said "caught button is same as uno button". 
+                    // Showing "SAID" is good feedback.
+                    // Let's add a fallback to show "SAID" if I said it, but not clickable for catch.
+
+                    if (gameState.saidUno) {
+                        return (
+                            <button disabled
+                                style={{
+                                    width: '120px', height: '80px',
+                                    background: '#555',
+                                    border: '4px solid #ffd700',
+                                    borderRadius: '10px',
+                                    transform: 'rotate(-10deg)',
+                                    boxShadow: '0 5px 15px rgba(0,0,0,0.5)',
+                                    cursor: 'default',
+                                    display: 'flex', alignItems: 'center', justifyContent: 'center'
+                                }}
+                            >
+                                <span style={{
+                                    fontFamily: "'Arial Black', 'Impact', sans-serif",
+                                    fontSize: '2rem',
+                                    color: '#888',
+                                    fontStyle: 'italic',
+                                    transform: 'skewX(-10deg)'
+                                }}>
+                                    SAID
+                                </span>
+                            </button>
+                        );
+                    }
+                    return null;
+                })()}
             </div>
 
             {/* My Hand - Fanned Out 3D */}
@@ -630,9 +641,14 @@ export default function Game() {
                     const top = gameState.topCard;
                     let playable = false;
                     if (myTurn) {
-                        if (card.color === 'black') playable = true;
-                        else if (card.color === gameState.currentColor) playable = true;
-                        else if (card.value === top.value) playable = true;
+                        if (gameState.drawPenalty > 0) {
+                            if (card.value === '+4') playable = true;
+                            else if (card.value === '+2' && card.color === gameState.currentColor) playable = true;
+                        } else {
+                            if (card.color === 'black') playable = true;
+                            else if (card.color === gameState.currentColor) playable = true;
+                            else if (card.value === top.value) playable = true;
+                        }
                     }
 
                     return (
@@ -679,7 +695,19 @@ export default function Game() {
                 </div>
             )}
             {/* Chat Box - Bottom Left */}
-            <button className="chat-toggle-btn" onClick={() => setIsChatOpen(!isChatOpen)}>💬</button>
+            <button className="chat-toggle-btn" onClick={() => setIsChatOpen(!isChatOpen)} style={{ position: 'relative' }}>
+                💬
+                {unreadCount > 0 && (
+                    <span style={{
+                        position: 'absolute', top: '-5px', right: '-5px',
+                        background: 'red', color: 'white',
+                        borderRadius: '50%', padding: '2px 6px',
+                        fontSize: '0.7rem', fontWeight: 'bold'
+                    }}>
+                        {unreadCount > 9 ? '9+' : unreadCount}
+                    </span>
+                )}
+            </button>
             <div className={`glass chat-container ${isChatOpen ? 'open' : ''}`}>
                 {/* Messages Area */}
                 <div style={{
@@ -717,6 +745,7 @@ export default function Game() {
                     }}>Send</button>
                 </form>
             </div>
+
         </div>
     );
 }

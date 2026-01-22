@@ -114,6 +114,7 @@ io.on('connection', (socket) => {
             discardPile: [],
             currentPlayerIndex: 0,
             direction: 1,
+            drawPenalty: 0,
             status: 'waiting'
         };
         socketRoomMap[socket.id] = roomCode;
@@ -287,15 +288,35 @@ io.on('connection', (socket) => {
 
         // Validation
         let isValid = false;
-        if (card.color === 'black') isValid = true;
-        else if (card.color === (room.currentColor || topCard.color)) isValid = true;
-        else if (card.value === topCard.value) isValid = true;
+        if (room.drawPenalty > 0) {
+            // Stack Rule: Must play +4 or +2 of matching color
+            if (card.value === '+4') isValid = true;
+            else if (card.value === '+2' && card.color === room.currentColor) isValid = true;
+        } else {
+            if (card.color === 'black') isValid = true;
+            else if (card.color === (room.currentColor || topCard.color)) isValid = true;
+            else if (card.value === topCard.value) isValid = true;
+        }
 
         if (isValid) {
             player.hand.splice(cardIndex, 1);
             room.discardPile.push(card);
 
-            // Special Cards
+            // Update Current Color (for all cards)
+            if (card.color === 'black') {
+                room.currentColor = chosenColor;
+            } else {
+                room.currentColor = card.color;
+            }
+
+            // Stacking Penalty
+            if (card.value === '+4') {
+                room.drawPenalty += 4;
+            } else if (card.value === '+2') {
+                room.drawPenalty += 2;
+            }
+
+            // Direction & Turn Logic
             if (card.value === 'skip') {
                 room.currentPlayerIndex = (room.currentPlayerIndex + room.direction + room.players.length) % room.players.length;
                 room.currentPlayerIndex = (room.currentPlayerIndex + room.direction + room.players.length) % room.players.length;
@@ -307,24 +328,9 @@ io.on('connection', (socket) => {
                     room.direction *= -1;
                     room.currentPlayerIndex = (room.currentPlayerIndex + room.direction + room.players.length) % room.players.length;
                 }
-            } else if (card.value === '+2') {
-                const nextPlayerIndex = (room.currentPlayerIndex + room.direction + room.players.length) % room.players.length;
-                const nextPlayer = room.players[nextPlayerIndex];
-                nextPlayer.hand.push(...room.deck.splice(0, 2));
-                room.currentPlayerIndex = (room.currentPlayerIndex + room.direction + room.players.length) % room.players.length;
-                room.currentPlayerIndex = (room.currentPlayerIndex + room.direction + room.players.length) % room.players.length;
-            } else if (card.value === 'wild') {
-                room.currentColor = chosenColor;
-                room.currentPlayerIndex = (room.currentPlayerIndex + room.direction + room.players.length) % room.players.length;
-            } else if (card.value === '+4') {
-                room.currentColor = chosenColor;
-                const nextPlayerIndex = (room.currentPlayerIndex + room.direction + room.players.length) % room.players.length;
-                const nextPlayer = room.players[nextPlayerIndex];
-                nextPlayer.hand.push(...room.deck.splice(0, 4));
-                room.currentPlayerIndex = (room.currentPlayerIndex + room.direction + room.players.length) % room.players.length;
-                room.currentPlayerIndex = (room.currentPlayerIndex + room.direction + room.players.length) % room.players.length;
             } else {
-                room.currentColor = card.color;
+                // For +4, +2, Wild, and Numbers: Advance just ONCE.
+                // The next player will face the penalty (if any) or play normally.
                 room.currentPlayerIndex = (room.currentPlayerIndex + room.direction + room.players.length) % room.players.length;
             }
 
@@ -492,6 +498,41 @@ io.on('connection', (socket) => {
         const isTurn = room.players[room.currentPlayerIndex].id === socket.id;
         if (!isTurn) return;
 
+        const player = room.players.find(p => p.id === socket.id);
+
+        // Penalty Logic
+        if (room.drawPenalty > 0) {
+            const count = room.drawPenalty;
+            const drawnCards = [];
+            for (let i = 0; i < count; i++) {
+                if (room.deck.length === 0) {
+                    if (room.discardPile.length > 1) {
+                        const top = room.discardPile.pop();
+                        room.deck = room.discardPile.map(c => ({ ...c })).sort(() => Math.random() - 0.5);
+                        room.discardPile = [top];
+                    } else {
+                        break;
+                    }
+                }
+                if (room.deck.length > 0) {
+                    const c = room.deck.shift();
+                    player.hand.push(c);
+                    drawnCards.push(c);
+                }
+            }
+            room.drawPenalty = 0;
+            player.saidUno = false;
+
+            // Turn Ends immediately after taking penalty
+            room.currentPlayerIndex = (room.currentPlayerIndex + room.direction + room.players.length) % room.players.length;
+
+            io.to(roomCode).emit('notification', { message: `${player.name} drew ${drawnCards.length} cards (Penalty).` });
+            updateGameState(roomCode);
+            handleBotTurn(roomCode, io);
+            return;
+        }
+
+        // Standard 1 Card Draw
         if (room.deck.length === 0) {
             const top = room.discardPile.pop();
             room.deck = room.discardPile.map(c => ({ ...c })).sort(() => Math.random() - 0.5);
@@ -500,14 +541,12 @@ io.on('connection', (socket) => {
 
         if (room.deck.length > 0) {
             const card = room.deck.shift();
-            const player = room.players.find(p => p.id === socket.id);
             player.hand.push(card);
             player.saidUno = false;
 
             // Check if Drawn Card is Playable
             const topCard = room.discardPile[room.discardPile.length - 1];
             let isValid = false;
-            // Simple validation reused (simplest form)
             if (card.color === 'black') isValid = true;
             else if (card.color === (room.currentColor || topCard.color)) isValid = true;
             else if (card.value === topCard.value) isValid = true;
@@ -613,7 +652,9 @@ function updateGameState(roomCode) {
             currentColor: room.currentColor || (room.discardPile.length > 0 ? room.discardPile[room.discardPile.length - 1].color : null),
             currentPlayerName: room.players[room.currentPlayerIndex].name,
             direction: room.direction,
-            saidUno: player.saidUno
+            saidUno: player.saidUno,
+            drawPenalty: room.drawPenalty,
+            status: room.status
         };
         io.to(player.id).emit('gameStateUpdate', gameState);
     });
@@ -634,15 +675,23 @@ function handleBotTurn(roomCode, io) {
         // Double check state hasn't changed drastically
         if (rooms[roomCode]?.currentPlayerIndex !== room.currentPlayerIndex) return;
 
-        // 1. Identify Valid Cards
-        const topCard = room.discardPile[room.discardPile.length - 1];
-        const validCards = player.hand.map((card, index) => {
-            let isValid = false;
-            if (card.color === 'black') isValid = true;
-            else if (card.color === (room.currentColor || topCard.color)) isValid = true;
-            else if (card.value === topCard.value) isValid = true;
-            return isValid ? { card, index } : null;
-        }).filter(c => c !== null);
+        // 1. Identify Valid Cards (incorporating Stacking Rule)
+        let validCards = [];
+        if (room.drawPenalty > 0) {
+            validCards = player.hand.map((card, index) => {
+                if (card.value === '+4') return { card, index };
+                if (card.value === '+2' && card.color === room.currentColor) return { card, index };
+                return null;
+            }).filter(c => c);
+        } else {
+            validCards = player.hand.map((card, index) => {
+                let isValid = false;
+                if (card.color === 'black') isValid = true;
+                else if (card.color === (room.currentColor || topCard.color)) isValid = true;
+                else if (card.value === topCard.value) isValid = true;
+                return isValid ? { card, index } : null;
+            }).filter(c => c);
+        }
 
         // 2. Decide Move
         if (validCards.length > 0) {
@@ -656,6 +705,9 @@ function handleBotTurn(roomCode, io) {
             player.hand.splice(index, 1);
             room.discardPile.push(card);
 
+            if (card.value === '+4') room.drawPenalty += 4;
+            else if (card.value === '+2') room.drawPenalty += 2;
+
             // Handle Wild Color Choice (Random valid color)
             let chosenColor = null;
             if (card.color === 'black') {
@@ -668,29 +720,33 @@ function handleBotTurn(roomCode, io) {
             }
 
             // Apply Effects
+            if (card.color !== 'black') room.currentColor = card.color;
+
             if (card.value === 'skip') {
+                room.currentPlayerIndex = (room.currentPlayerIndex + room.direction + room.players.length) % room.players.length;
                 room.currentPlayerIndex = (room.currentPlayerIndex + room.direction + room.players.length) % room.players.length;
             } else if (card.value === 'reverse') {
                 if (room.players.length === 2) {
                     room.currentPlayerIndex = (room.currentPlayerIndex + room.direction + room.players.length) % room.players.length;
+                    room.currentPlayerIndex = (room.currentPlayerIndex + room.direction + room.players.length) % room.players.length;
                 } else {
                     room.direction *= -1;
+                    room.currentPlayerIndex = (room.currentPlayerIndex + room.direction + room.players.length) % room.players.length;
                 }
             } else if (card.value === '+2') {
-                const nextPlayerIndex = (room.currentPlayerIndex + room.direction + room.players.length) % room.players.length;
-                const nextPlayer = room.players[nextPlayerIndex];
-                nextPlayer.hand.push(...room.deck.splice(0, 2));
+                // Stack Rule: Advance to victim (who must respond)
                 room.currentPlayerIndex = (room.currentPlayerIndex + room.direction + room.players.length) % room.players.length;
             } else if (card.value === 'wild') {
                 room.currentColor = chosenColor;
             } else if (card.value === '+4') {
                 room.currentColor = chosenColor;
-                const nextPlayerIndex = (room.currentPlayerIndex + room.direction + room.players.length) % room.players.length;
-                const nextPlayer = room.players[nextPlayerIndex];
-                nextPlayer.hand.push(...room.deck.splice(0, 4));
+                // Stack Rule: Advance to victim
                 room.currentPlayerIndex = (room.currentPlayerIndex + room.direction + room.players.length) % room.players.length;
             } else {
-                room.currentColor = card.color;
+                // Numbers / others handled by the fall-through block below
+                // But wait, the fall-through block explicitly excludes +2/+4
+                // So I MUST advance here for +2/+4? 
+                // YES, I did above.
             }
 
             // Advance Turn (if not skipped/effected already handled above logic is slightly diff from original PlayCard... 
@@ -840,7 +896,36 @@ function handleBotTurn(roomCode, io) {
             }
 
         } else {
-            // Draw
+            // Must Draw / Accept Penalty
+            if (room.drawPenalty > 0) {
+                const count = room.drawPenalty;
+                const drawnCards = [];
+                for (let i = 0; i < count; i++) {
+                    if (room.deck.length === 0) {
+                        if (room.discardPile.length > 1) {
+                            const top = room.discardPile.pop();
+                            room.deck = room.discardPile.map(c => ({ ...c })).sort(() => Math.random() - 0.5);
+                            room.discardPile = [top];
+                        } else break;
+                    }
+                    if (room.deck.length > 0) {
+                        const c = room.deck.shift();
+                        player.hand.push(c);
+                        drawnCards.push(c);
+                    }
+                }
+                room.drawPenalty = 0;
+                player.saidUno = false;
+                io.to(roomCode).emit('notification', { message: `${player.name} drew ${drawnCards.length} cards (Penalty).` });
+
+                // Skip Turn after penalty
+                room.currentPlayerIndex = (room.currentPlayerIndex + room.direction + room.players.length) % room.players.length;
+                updateGameState(roomCode);
+                handleBotTurn(roomCode, io);
+                return;
+            }
+
+            // Standard Draw
             console.log(`[Bot] ${player.name} draws.`);
             if (room.deck.length === 0) {
                 const top = room.discardPile.pop();
@@ -917,6 +1002,19 @@ if (process.env.NODE_ENV === 'production') {
 
     app.get('*', (req, res) => {
         res.sendFile(path.resolve(__dirname, '../client/dist', 'index.html'));
+    });
+} else {
+    // Development fallback for users accidentally hitting backend URL
+    app.get('/game/:roomCode', (req, res) => {
+        // If the user tries to open the game on port 4000 (Backend) in dev mode,
+        // it won't work because the React app is served by Vite on a different port (usually 5173).
+        // specific instruction to user
+        res.type('html').send(`
+            <h1>Wrong Port!</h1>
+            <p>You are accessing the <b>Backend Server</b> directly (Port ${process.env.PORT || 4000}).</p>
+            <p>Please use the <b>Client URL</b> (usually Port 5173) to play the game.</p>
+            <p>Try: <a href="http://${req.hostname}:5173${req.url}">http://${req.hostname}:5173${req.url}</a></p>
+        `);
     });
 }
 
