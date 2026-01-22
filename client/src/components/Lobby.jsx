@@ -92,33 +92,21 @@ export default function Lobby() {
                         </div>
                     </div>
                 </div>
-
-                {/* Watermark / Footer */}
-                <div style={{
-                    marginTop: 'auto',
-                    paddingBottom: '20px',
-                    color: 'rgba(255,255,255,0.4)',
-                    fontSize: '0.9rem',
-                    fontFamily: 'monospace',
-                    textTransform: 'uppercase',
-                    letterSpacing: '1px'
-                }}>
-                    Made by Vedant Darokar
-                </div>
             </div>
-        </div>
 
-            {/* Watermark / Footer */ }
-    <div style={{
-        paddingBottom: '20px',
-        color: 'rgba(255,255,255,0.4)',
-        fontSize: '0.9rem',
-        fontFamily: 'monospace',
-        textTransform: 'uppercase',
-        letterSpacing: '1px'
-    }}>
-        Made by Vedant Darokar
-    </div>
+
+            {/* Watermark / Footer */}
+            <div style={{
+                paddingBottom: '20px',
+                color: 'rgba(255,255,255,0.4)',
+                fontSize: '0.9rem',
+                fontFamily: 'monospace',
+                textTransform: 'uppercase',
+                letterSpacing: '1px'
+            }}>
+                Made by <a href="https://github.com/VedantDarokar" target="_blank" rel="noopener noreferrer" style={{ color: 'inherit', textDecoration: 'none', fontWeight: 'bold' }}>Vedant Darokar</a>
+            </div>
+        </div >
     );
 }
 
