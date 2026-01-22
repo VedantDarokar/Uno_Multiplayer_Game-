@@ -23,7 +23,11 @@ body {
   background: radial-gradient(circle at center, #8B0000 20%, #2a0000 100%);
   color: var(--text-light);
   min-height: 100vh;
-  overflow: hidden;
+  /* mobile viewport bug fix */
+  min-height: -webkit-fill-available;
+  overflow-x: hidden;
+  overflow-y: auto;
+  /* Allow Scroll if needed on small screens to prevent clipping */
 }
 
 button {
@@ -42,6 +46,8 @@ button {
 .full-screen {
   width: 100vw;
   height: 100vh;
+  height: 100dvh;
+  /* Dynamic Viewport Height for mobile browsers */
 }
 
 .glass {

@@ -103,9 +103,33 @@ export default function Game() {
         });
 
         // Initial Sync: Check if we are already in the room or need to join
-        socket.emit('syncGameState', { roomCode });
+        if (socket.connected) {
+            socket.emit('syncGameState', { roomCode });
+        } else {
+            socket.connect();
+            // Wait for connect
+            socket.once('connect', () => {
+                socket.emit('syncGameState', { roomCode });
+            });
+        }
+
+        // Safety Timeout: If stuck on loading for 2s, assume we need to join or fetch failed
+        const timer = setTimeout(() => {
+            if (!gameState && !needsToJoin) {
+                // If we haven't received state or join prompt, ask server again or default to join view
+                console.log("Sync timeout, requesting newcomer state...");
+                // Force a check or UI update. 
+                // We don't want to force access if room invalid, but we can't tell difference yet.
+                // Best fallback: Assume we need to join if we have no socket ID match in hypothetical list?
+                // Actually server sends 'roomStateForNewcomer' if we aren't found.
+                // If server is slow/down, we see loading. 
+                // If socket not connected, we see loading.
+                if (socket.connected) socket.emit('syncGameState', { roomCode });
+            }
+        }, 1000);
 
         return () => {
+            clearTimeout(timer);
             socket.off('playerListUpdate');
             socket.off('gameStart');
             socket.off('gameStateUpdate');

@@ -1,11 +1,17 @@
 import { io } from "socket.io-client";
 
-// In production, this should be the deployed server URL.
-// For local dev, it's localhost:3000
-export const SERVER_URL = import.meta.env.VITE_SERVER_URL || (window.location.hostname === 'localhost'
-    ? "http://localhost:4000"
-    : `http://${window.location.hostname}:4000`);
+// PRODUCTION SETUP (Vercel):
+// 1. You MUST set the environment variable 'VITE_SERVER_URL' in your Vercel Project Settings.
+// 2. This variable should point to your deploy backend URL (e.g., https://your-app-api.onrender.com).
+// 3. If you do not set this, it defaults to "/", which only works if you configured Vercel Rewrites to proxy /socket.io.
+
+const isDev = import.meta.env.DEV;
+export const SERVER_URL = import.meta.env.VITE_SERVER_URL || (isDev ? "http://localhost:4000" : "/");
+
+console.log(`[Socket] Target Server: ${SERVER_URL}`);
 
 export const socket = io(SERVER_URL, {
-    autoConnect: false
+    autoConnect: false,
+    transports: ['websocket', 'polling'], // Try WebSocket first for better performance on Vercel/mobile
+    withCredentials: true
 });
