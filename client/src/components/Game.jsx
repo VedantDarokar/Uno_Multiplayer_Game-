@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { socket } from '../socket';
 import Card from './Card';
 import { soundManager } from '../utils/SoundManager';
-import { useRef } from 'react';
+
 
 export default function Game() {
     const params = useParams();
@@ -23,23 +23,7 @@ export default function Game() {
     const [joinName, setJoinName] = useState('');
 
     // Chat State
-    const [messages, setMessages] = useState([]);
-    const [chatInput, setChatInput] = useState('');
-    const [isChatOpen, setIsChatOpen] = useState(false);
-    const [unreadCount, setUnreadCount] = useState(0);
-    const chatOpenRef = useRef(isChatOpen);
 
-    // Sync Ref with State
-    useEffect(() => {
-        chatOpenRef.current = isChatOpen;
-    }, [isChatOpen]);
-
-    const toggleChat = () => {
-        if (!isChatOpen) {
-            setUnreadCount(0);
-        }
-        setIsChatOpen(!isChatOpen);
-    };
 
     useEffect(() => {
         if (gameState && gameState.currentPlayerName !== players.find(p => p.id === socket.id)?.name) {
@@ -112,12 +96,7 @@ export default function Game() {
             setTimeout(() => toast.remove(), 3000);
         });
 
-        socket.on('receiveMessage', (msg) => {
-            setMessages(prev => [...prev, msg].slice(-20)); // Keep last 20
-            if (!chatOpenRef.current) {
-                setUnreadCount(prev => prev + 1);
-            }
-        });
+
 
         // Initial Sync: Check if we are already in the room or need to join
         if (socket.connected) {
@@ -205,12 +184,7 @@ export default function Game() {
     };
 
 
-    const sendMessage = (e) => {
-        if (e) e.preventDefault();
-        if (!chatInput.trim()) return;
-        socket.emit('sendMessage', { roomCode, message: chatInput.trim() });
-        setChatInput('');
-    };
+
 
     const restartGame = () => {
         socket.emit('restartGame', { roomCode });
@@ -529,6 +503,7 @@ export default function Game() {
                 pointerEvents: 'none'
             }}>
                 {myTurn ? (gameState.drawPenalty > 0 ? `⚠️ DRAW ${gameState.drawPenalty} OR STACK! ⚠️` : "⚠️ YOUR TURN ⚠️") : `${gameState.currentPlayerName.toUpperCase()}'S TURN`}
+
             </div>
 
             {/* Opponents (2D Overlay) */}
@@ -559,15 +534,38 @@ export default function Game() {
                                 {op.name}
                             </div>
 
-                            {/* Avatar Box */}
-                            <div style={{
-                                width: '80px', height: '80px', background: '#333',
-                                borderRadius: '10px', border: `3px solid ${isOpTurn ? '#ffff00' : 'white'}`,
-                                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                                boxShadow: isOpTurn ? '0 0 20px #ffff00' : '0 4px 10px rgba(0,0,0,0.5)',
-                                overflow: 'hidden'
-                            }}>
-                                <span style={{ fontSize: '2.5rem' }}>🤖</span>
+                            {/* Avatar Box with Timer Ring */}
+                            <div style={{ position: 'relative', width: '80px', height: '80px' }}>
+                                {/* Timer Ring SVG */}
+                                {isOpTurn && gameState.turnDeadline && (
+                                    <svg width="90" height="90" viewBox="0 0 100 100" style={{
+                                        position: 'absolute', top: '-5px', left: '-5px',
+                                        transform: 'rotate(-90deg)', zIndex: 0
+                                    }}>
+                                        <circle cx="50" cy="50" r="46" fill="none" stroke="#333" strokeWidth="6" />
+                                        <circle cx="50" cy="50" r="46" fill="none" stroke="gold" strokeWidth="6"
+                                            strokeDasharray="289" // 2 * pi * 46
+                                            strokeDashoffset="0"
+                                            style={{
+                                                animation: `countdown ${Math.max(0, (gameState.turnDeadline - Date.now()) / 1000)}s linear forwards`
+                                            }}
+                                        >
+                                            <animate attributeName="stroke-dashoffset" from="0" to="289" dur={`${Math.max(0, (gameState.turnDeadline - Date.now()) / 1000)}s`} fill="freeze" />
+                                        </circle>
+                                    </svg>
+                                )}
+
+                                <div style={{
+                                    width: '100%', height: '100%', background: '#333',
+                                    borderRadius: '50%', // Round avatar
+                                    border: `3px solid ${isOpTurn ? '#ffff00' : 'white'}`,
+                                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                    boxShadow: isOpTurn ? '0 0 20px #ffff00' : '0 4px 10px rgba(0,0,0,0.5)',
+                                    overflow: 'hidden',
+                                    position: 'relative', zIndex: 1
+                                }}>
+                                    <span style={{ fontSize: '2.5rem' }}>{op.name.startsWith('Bot') || op.isBot ? '🤖' : '👤'}</span>
+                                </div>
                             </div>
 
                             {/* Card Count Badge */}
@@ -700,6 +698,59 @@ export default function Game() {
                 perspective: '1000px',
                 zIndex: 50
             }}>
+                {/* Local Player Avatar - Positioned ABOVE the hand */}
+                {/* Hand container is 250px high, bottom -40px. 
+                    To put above cards: Use absolute top negative.
+                */}
+                <div style={{
+                    position: 'absolute', top: '-30px', left: '50%',
+                    transform: `translateX(-50%) ${myTurn ? 'scale(1.1)' : 'scale(1)'}`,
+                    display: 'flex', flexDirection: 'column', alignItems: 'center',
+                    transition: 'all 0.3s',
+                    zIndex: 60
+                }}>
+                    {/* Timer Ring SVG */}
+                    {myTurn && gameState.turnDeadline && (
+                        <svg width="90" height="90" viewBox="0 0 100 100" style={{
+                            position: 'absolute', top: '-5px', left: '-5px',
+                            transform: 'rotate(-90deg)', zIndex: 0
+                        }}>
+                            <circle cx="50" cy="50" r="46" fill="none" stroke="#333" strokeWidth="6" />
+                            <circle cx="50" cy="50" r="46" fill="none" stroke="gold" strokeWidth="6"
+                                strokeDasharray="289"
+                                strokeDashoffset="0"
+                                style={{
+                                    animation: gameState.turnDeadline > Date.now() ? `countdown ${Math.max(0, (gameState.turnDeadline - Date.now()) / 1000)}s linear forwards` : 'none'
+                                }}
+                            >
+                                <animate attributeName="stroke-dashoffset" from="0" to="289" dur={`${Math.max(0, (gameState.turnDeadline - Date.now()) / 1000)}s`} fill="freeze" />
+                            </circle>
+                        </svg>
+                    )}
+
+                    <div style={{
+                        width: '80px', height: '80px', background: '#333',
+                        borderRadius: '50%',
+                        border: `3px solid ${myTurn ? '#ffff00' : 'white'}`,
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        boxShadow: myTurn ? '0 0 20px #ffff00' : '0 4px 10px rgba(0,0,0,0.5)',
+                        zIndex: 1, position: 'relative'
+                    }}>
+                        <span style={{ fontSize: '2.5rem' }}>👤</span>
+                    </div>
+                    <div style={{
+                        marginTop: '10px',
+                        background: 'linear-gradient(to bottom, #4ade80, #22c55e)',
+                        padding: '2px 10px', borderRadius: '10px',
+                        color: 'white', fontWeight: 'bold', fontSize: '0.9rem',
+                        border: '2px solid white', boxShadow: '0 2px 5px rgba(0,0,0,0.3)',
+                        zIndex: 2,
+                        textShadow: '0 1px 2px rgba(0,0,0,0.5)'
+                    }}>
+                        You
+                    </div>
+                </div>
+
                 {gameState.hand.map((card, index) => {
                     const total = gameState.hand.length;
                     const midpoint = (total - 1) / 2;
@@ -762,59 +813,7 @@ export default function Game() {
                     </div>
                 </div>
             )}
-            {/* Chat Box - Bottom Left */}
-            <button className="chat-toggle-btn" onClick={toggleChat} style={{ position: 'relative' }}>
-                💬
-                {unreadCount > 0 && (
-                    <span style={{
-                        position: 'absolute', top: '-5px', right: '-5px',
-                        background: 'red', color: 'white',
-                        borderRadius: '50%', width: '20px', height: '20px',
-                        fontSize: '0.8rem', display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        border: '2px solid white'
-                    }}>
-                        {unreadCount}
-                    </span>
-                )}
-            </button>
 
-            <div className={`glass chat-container ${isChatOpen ? 'open' : ''}`}>
-                {/* Messages Area */}
-                <div style={{
-                    flex: 1, overflowY: 'auto', padding: '10px',
-                    display: 'flex', flexDirection: 'column', gap: '5px',
-                    fontSize: '0.9rem'
-                }}>
-                    {messages.map((msg, i) => (
-                        <div key={i}>
-                            <span style={{ fontWeight: 'bold', color: msg.sender === 'System' ? '#aaa' : 'var(--uno-yellow)' }}>
-                                {msg.sender}:
-                            </span> <span style={{ color: '#fff' }}>{msg.text}</span>
-                        </div>
-                    ))}
-                    {/* Auto scroll stub */}
-                    <div ref={el => el?.scrollIntoView({ behavior: "smooth" })}></div>
-                </div>
-                {/* Input Area */}
-                <form onSubmit={sendMessage} style={{ display: 'flex', borderTop: '1px solid rgba(255,255,255,0.1)' }}>
-                    <input
-                        type="text"
-                        value={chatInput}
-                        onChange={e => setChatInput(e.target.value)}
-                        placeholder="Say something..."
-                        style={{
-                            flex: 1, background: 'transparent',
-                            border: 'none', color: 'white', padding: '10px',
-                            outline: 'none'
-                        }}
-                    />
-                    <button type="submit" style={{
-                        background: 'transparent', border: 'none',
-                        color: 'var(--uno-yellow)', fontWeight: 'bold',
-                        padding: '0 15px', cursor: 'pointer'
-                    }}>Send</button>
-                </form>
-            </div>
         </div>
     );
 }

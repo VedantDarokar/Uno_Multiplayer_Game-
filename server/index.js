@@ -266,6 +266,7 @@ io.on('connection', (socket) => {
                 currentColor: room.currentColor
             });
 
+            resetTurnTimer(roomCode);
             updateGameState(roomCode);
             handleBotTurn(roomCode, io);
         }
@@ -359,6 +360,7 @@ io.on('connection', (socket) => {
                     breakdown: pointsBreakdown
                 });
                 room.status = 'ended';
+                if (room.turnTimer) clearTimeout(room.turnTimer);
 
                 try {
                     const game = new Game({
@@ -398,6 +400,7 @@ io.on('connection', (socket) => {
                 }
                 return;
             } else {
+                resetTurnTimer(roomCode);
                 updateGameState(roomCode);
                 handleBotTurn(roomCode, io);
             }
@@ -452,6 +455,7 @@ io.on('connection', (socket) => {
             discardPile: room.discardPile,
             currentColor: room.currentColor
         });
+        resetTurnTimer(roomCode);
         updateGameState(roomCode);
         handleBotTurn(roomCode, io);
     });
@@ -487,6 +491,7 @@ io.on('connection', (socket) => {
 
         room.currentPlayerIndex = (room.currentPlayerIndex + room.direction + room.players.length) % room.players.length;
         io.to(roomCode).emit('notification', { message: `${room.players.find(p => p.id === socket.id).name} passed.` });
+        resetTurnTimer(roomCode);
         updateGameState(roomCode);
         handleBotTurn(roomCode, io);
     });
@@ -527,6 +532,7 @@ io.on('connection', (socket) => {
             room.currentPlayerIndex = (room.currentPlayerIndex + room.direction + room.players.length) % room.players.length;
 
             io.to(roomCode).emit('notification', { message: `${player.name} drew ${drawnCards.length} cards (Penalty).` });
+            resetTurnTimer(roomCode);
             updateGameState(roomCode);
             handleBotTurn(roomCode, io);
             return;
@@ -560,6 +566,7 @@ io.on('connection', (socket) => {
                 io.to(roomCode).emit('notification', { message: `${player.name} drew and passed.` });
             }
 
+            resetTurnTimer(roomCode);
             updateGameState(roomCode);
             handleBotTurn(roomCode, io);
         }
@@ -633,6 +640,44 @@ io.on('connection', (socket) => {
     });
 });
 
+const TURN_DURATION = 20000; // 20 seconds
+
+function resetTurnTimer(roomCode) {
+    const room = rooms[roomCode];
+    if (!room || room.status !== 'playing') return;
+
+    // Clear existing timer
+    if (room.turnTimer) {
+        clearTimeout(room.turnTimer);
+    }
+
+    // Set deadline
+    room.turnDeadline = Date.now() + TURN_DURATION;
+
+    // Set new timer
+    room.turnTimer = setTimeout(() => {
+        handleTurnTimeout(roomCode);
+    }, TURN_DURATION);
+}
+
+function handleTurnTimeout(roomCode) {
+    const room = rooms[roomCode];
+    if (!room || room.status !== 'playing') return;
+
+    const player = room.players[room.currentPlayerIndex];
+    console.log(`[Turn Timeout] ${player.name} in room ${roomCode}`);
+
+    // Skip Turn
+    room.currentPlayerIndex = (room.currentPlayerIndex + room.direction + room.players.length) % room.players.length;
+
+    io.to(roomCode).emit('notification', { message: `${player.name} ran out of time! Turn skipped.` });
+
+    // Check if next player is bot, etc.
+    updateGameState(roomCode);
+    resetTurnTimer(roomCode); // Restart for next player
+    handleBotTurn(roomCode, io);
+}
+
 function updateGameState(roomCode) {
     const room = rooms[roomCode];
     if (!room) return;
@@ -645,7 +690,8 @@ function updateGameState(roomCode) {
                 name: p.name,
                 cards: p.hand.length,
                 saidUno: p.saidUno,
-                connected: p.connected
+                connected: p.connected,
+                isBot: p.isBot
             })),
             discardPile: room.discardPile,
             topCard: room.discardPile[room.discardPile.length - 1],
@@ -654,7 +700,8 @@ function updateGameState(roomCode) {
             direction: room.direction,
             saidUno: player.saidUno,
             drawPenalty: room.drawPenalty,
-            status: room.status
+            status: room.status,
+            turnDeadline: room.turnDeadline // Send deadline
         };
         io.to(player.id).emit('gameStateUpdate', gameState);
     });
@@ -669,11 +716,15 @@ function handleBotTurn(roomCode, io) {
     const player = room.players[room.currentPlayerIndex];
     if (!player || !player.isBot) return;
 
+    const currentIndex = room.currentPlayerIndex;
+
     console.log(`[Bot] ${player.name} is thinking...`);
 
     setTimeout(async () => {
-        // Double check state hasn't changed drastically
-        if (rooms[roomCode]?.currentPlayerIndex !== room.currentPlayerIndex) return;
+        // Double check state hasn't changed via turn timeout or other events
+        if (rooms[roomCode]?.currentPlayerIndex !== currentIndex) return;
+
+        const topCard = room.discardPile[room.discardPile.length - 1];
 
         // 1. Identify Valid Cards (incorporating Stacking Rule)
         let validCards = [];
@@ -720,104 +771,42 @@ function handleBotTurn(roomCode, io) {
             }
 
             // Apply Effects
+            // Apply Effects & Advance Turn
+            // 1. Set Color
             if (card.color !== 'black') room.currentColor = card.color;
 
+            // 2. Handle Action Cards & Turn Advancement
             if (card.value === 'skip') {
-                room.currentPlayerIndex = (room.currentPlayerIndex + room.direction + room.players.length) % room.players.length;
-                room.currentPlayerIndex = (room.currentPlayerIndex + room.direction + room.players.length) % room.players.length;
-            } else if (card.value === 'reverse') {
-                if (room.players.length === 2) {
-                    room.currentPlayerIndex = (room.currentPlayerIndex + room.direction + room.players.length) % room.players.length;
-                    room.currentPlayerIndex = (room.currentPlayerIndex + room.direction + room.players.length) % room.players.length;
-                } else {
-                    room.direction *= -1;
-                    room.currentPlayerIndex = (room.currentPlayerIndex + room.direction + room.players.length) % room.players.length;
-                }
-            } else if (card.value === '+2') {
-                // Stack Rule: Advance to victim (who must respond)
-                room.currentPlayerIndex = (room.currentPlayerIndex + room.direction + room.players.length) % room.players.length;
-            } else if (card.value === 'wild') {
-                room.currentColor = chosenColor;
-            } else if (card.value === '+4') {
-                room.currentColor = chosenColor;
-                // Stack Rule: Advance to victim
-                room.currentPlayerIndex = (room.currentPlayerIndex + room.direction + room.players.length) % room.players.length;
-            } else {
-                // Numbers / others handled by the fall-through block below
-                // But wait, the fall-through block explicitly excludes +2/+4
-                // So I MUST advance here for +2/+4? 
-                // YES, I did above.
-            }
-
-            // Advance Turn (if not skipped/effected already handled above logic is slightly diff from original PlayCard... 
-            // Original PlayCard handled advancement IN the effect blocks for skip/+2.
-            // But basic cards fall through.
-            // Let's match original logic structure to be safe.
-            if (card.value !== 'skip' && card.value !== 'reverse' && card.value !== '+2' && card.value !== '+4') {
-                room.currentPlayerIndex = (room.currentPlayerIndex + room.direction + room.players.length) % room.players.length;
-                room.currentPlayerIndex = (room.currentPlayerIndex + room.direction + room.players.length) % room.players.length; // Wait, why twice?
-                // Original logic lines 238: index = ...
-                // Actually original logic seemed to have a bug or I misread?
-                // Line 238: `room.currentPlayerIndex = (room.currentPlayerIndex + ...)`
-                // Oh, looking at original PlayCard:
-                // skip: advances twice? "currentPlayerIndex = ...; currentPlayerIndex = ..." (lines 210-211).
-                // Ah, ONE advance is "Action", SECOND is "Next Player".
-                // In UNO, Skip means: Active Player plays Skip. Next player is skipped. Turn goes to Player After.
-                // So: Current -> Target (Skipped) -> Next.
-                // Correct logic: Advance ONCE effectively skips if we don't process their turn. 
-                // But simply index += 2?
-                // Original code:
-                // 210: index = index + dir
-                // 211: index = index + dir
-                // Yes, it skips the immediate next.
-
-                // However, for Normal cards (Line 238):
-                // One advance.
-                // Wait, original Line 238 seems to index = index + dir.
-                // Checks out.
-
-                // BUT: My logic above for Skip/+2 used ONE advance line in some cases?
-                // Let's re-verify:
-                // Skip: I did `room.currentPlayerIndex = ...`. Check orig: It did it TWICE.
-                // I should match original.
-            }
-            // Wait, my bot logic above for 'skip' only advanced ONCE. I need to fix that.
-
-            // Re-evaluating Index Logic
-            // Standard "Next Turn": Index + Direction.
-            // Skip: Index + Direction * 2.
-            // +2: Next player draws. Then Index + Direction * 2? Or does +2 skip them? 
-            // Rule: "Next player draws 2 cards and loses their turn". So yes, skip them.
-            // Original code +2 (220): NextPlayer gets cards (223). Then index updated (224), then updated AGAIN (225).
-            // So YES, original code skips the person who drew.
-
-            // Fix Bot Logic:
-            if (card.value === 'skip') {
+                // Skip next player: Advance 2 steps
                 room.currentPlayerIndex = (room.currentPlayerIndex + 2 * room.direction + 2 * room.players.length) % room.players.length;
             } else if (card.value === 'reverse') {
                 if (room.players.length === 2) {
+                    // Treat as Skip
                     room.currentPlayerIndex = (room.currentPlayerIndex + 2 * room.direction + 2 * room.players.length) % room.players.length;
                 } else {
+                    // Reverse direction, then advance 1 step (to next player in new direction)
                     room.direction *= -1;
                     room.currentPlayerIndex = (room.currentPlayerIndex + room.direction + room.players.length) % room.players.length;
                 }
             } else if (card.value === '+2') {
-                // Victim
+                // Victim draws 2 and is skipped
                 const victimIndex = (room.currentPlayerIndex + room.direction + room.players.length) % room.players.length;
                 room.players[victimIndex].hand.push(...room.deck.splice(0, 2));
-                // Skip victim
+                // Skip victim: Advance 2 steps
                 room.currentPlayerIndex = (room.currentPlayerIndex + 2 * room.direction + 2 * room.players.length) % room.players.length;
             } else if (card.value === 'wild') {
                 room.currentColor = chosenColor;
+                // Next turn: Advance 1 step
                 room.currentPlayerIndex = (room.currentPlayerIndex + room.direction + room.players.length) % room.players.length;
             } else if (card.value === '+4') {
                 room.currentColor = chosenColor;
+                // Victim draws 4 and is skipped
                 const victimIndex = (room.currentPlayerIndex + room.direction + room.players.length) % room.players.length;
                 room.players[victimIndex].hand.push(...room.deck.splice(0, 4));
-                // Skip
+                // Skip victim: Advance 2 steps
                 room.currentPlayerIndex = (room.currentPlayerIndex + 2 * room.direction + 2 * room.players.length) % room.players.length;
             } else {
-                // Normal
+                // Normal Number Card: Advance 1 step
                 room.currentPlayerIndex = (room.currentPlayerIndex + room.direction + room.players.length) % room.players.length;
             }
 
@@ -855,6 +844,7 @@ function handleBotTurn(roomCode, io) {
                     breakdown: pointsBreakdown
                 });
                 room.status = 'ended';
+                if (room.turnTimer) clearTimeout(room.turnTimer);
 
                 // Save Game Logic
                 try {
@@ -920,6 +910,7 @@ function handleBotTurn(roomCode, io) {
 
                 // Skip Turn after penalty
                 room.currentPlayerIndex = (room.currentPlayerIndex + room.direction + room.players.length) % room.players.length;
+                resetTurnTimer(roomCode);
                 updateGameState(roomCode);
                 handleBotTurn(roomCode, io);
                 return;
@@ -989,6 +980,13 @@ function handleBotTurn(roomCode, io) {
             }
         }
 
+        const currentRoom = rooms[roomCode];
+        if (currentRoom && currentRoom.status === 'playing') {
+            const currentP = currentRoom.players[currentRoom.currentPlayerIndex];
+            if (currentP && currentP.id !== player.id) {
+                resetTurnTimer(roomCode);
+            }
+        }
         updateGameState(roomCode);
         handleBotTurn(roomCode, io); // Trigger next player (if bot)
 
